@@ -343,6 +343,14 @@ class SharedPreferencesStore(context: Context) {
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val dbAdapter = moshi.adapter(RGUHSDatabase::class.java)
 
+    fun getAppRole(): String {
+        return prefs.getString("app_role_mode", "STUDENT") ?: "STUDENT"
+    }
+
+    fun setAppRole(role: String) {
+        prefs.edit().putString("app_role_mode", role).apply()
+    }
+
     fun loadDatabase(): RGUHSDatabase {
         val currentVersion = CURRENT_APP_VERSION
         val cachedVersion = prefs.getInt("local_database_version", 0)
@@ -864,9 +872,18 @@ fun MainAppLayout(activity: ComponentActivity) {
     val activeStudent = remember { mutableStateOf(store.loadActiveStudentSession()) }
     val isSyncing = remember { mutableStateOf(false) }
     val infoMessage = remember { mutableStateOf("") }
+    val currentRole = remember { mutableStateOf(store.getAppRole()) }
     
     // Custom backstack navigation state (provides absolute hardware back safety)
-    val screenBackstack = remember { mutableStateListOf<Screen>(Screen.Home) }
+    val screenBackstack = remember {
+        val initialList = mutableStateListOf<Screen>()
+        if (store.getAppRole() == "ADMIN") {
+            initialList.add(Screen.AdminConsole)
+        } else {
+            initialList.add(Screen.Home)
+        }
+        initialList
+    }
     val currentScreen = screenBackstack.lastOrNull() ?: Screen.Home
     
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -1082,8 +1099,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                             selected = false,
                             onClick = {
                                 coroutineScope.launch { drawerState.close() }
-                                isRegisteringHelp.value = false
-                                showSupportHelpDialog.value = true
+                                openSupportGmail(context, database.value)
                             }
                         )
                     }
@@ -1371,13 +1387,13 @@ fun MainAppLayout(activity: ComponentActivity) {
                                  screenBackstack.add(Screen.Semesters(id))
                              },
                              onHelpSelect = {
-                                 val rawHelp = database.value.appConfig.helpLink?.trim() ?: "https://t.me/rguhs_nursing"
+                                 openSupportGmail(context, database.value); if (false) { val rawHelp = database.value.appConfig.helpLink?.trim() ?: "https://t.me/rguhs_nursing"
                                  val finalHelp = if (rawHelp.isBlank() || (rawHelp.contains("@") && !rawHelp.startsWith("http", ignoreCase = true))) {
                                      "https://t.me/rguhs_nursing"
                                  } else {
                                      rawHelp
                                  }
-                                 safeOpenLink(context, finalHelp)
+                                 safeOpenLink(context, finalHelp) }
                              },
                              onPortalSelect = {
                                  screenBackstack.add(Screen.StudentPortal)
@@ -1443,8 +1459,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                                 }
                             },
                             onSupportClick = { isRegistering ->
-                                isRegisteringHelp.value = isRegistering
-                                showSupportHelpDialog.value = true
+                                openSupportGmail(context, database.value)
                             }
                         )
                         is Screen.AdminConsole -> AdminConsoleScreen(
@@ -1452,7 +1467,11 @@ fun MainAppLayout(activity: ComponentActivity) {
                             store = store,
                             binKey = binKey.value,
                             onBack = {
-                                screenBackstack.removeAt(screenBackstack.lastIndex)
+                                if (screenBackstack.size > 1) {
+                                    screenBackstack.removeAt(screenBackstack.lastIndex)
+                                } else {
+                                    activity.finish()
+                                }
                             },
                             onDbUpdate = { updatedDb ->
                                 // 1. Automatically increment database payload version before publishing!
@@ -1488,6 +1507,17 @@ fun MainAppLayout(activity: ComponentActivity) {
                             onKeyUpdate = { updatedKey ->
                                 binKey.value = updatedKey
                                 store.saveBinKey(updatedKey)
+                            },
+                            currentRole = currentRole.value,
+                            onRoleChange = { newRole ->
+                                store.setAppRole(newRole)
+                                currentRole.value = newRole
+                                screenBackstack.clear()
+                                if (newRole == "ADMIN") {
+                                    screenBackstack.add(Screen.AdminConsole)
+                                } else {
+                                    screenBackstack.add(Screen.Home)
+                                }
                             }
                         )
                         is Screen.PdfViewer -> PdfViewerScreen(
@@ -3329,7 +3359,7 @@ fun StudentPortalScreen(
                                 color = Color(0xFF92400E)
                             )
                             Text(
-                                text = "Contact Official Support directly on Telegram",
+                                text = "Contact Official Support directly via Gmail",
                                 fontSize = 10.sp,
                                 color = Color(0xFFB45309)
                             )
@@ -3857,7 +3887,9 @@ fun AdminConsoleScreen(
     binKey: String,
     onBack: () -> Unit,
     onDbUpdate: (RGUHSDatabase) -> Unit,
-    onKeyUpdate: (String) -> Unit
+    onKeyUpdate: (String) -> Unit,
+    currentRole: String = "STUDENT",
+    onRoleChange: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -4738,6 +4770,127 @@ fun AdminConsoleScreen(
                             letterSpacing = 0.5.sp
                         )
 
+                        // 1A. APP RUNTIME ROLE & STANDALONE IDENTITY Configuration Section
+                        AdminSectionCard(title = "1A. APP RUNTIME ROLE & STANDALONE IDENTITY") {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Flip,
+                                        contentDescription = "Standalone Mode",
+                                        tint = if (currentRole == "ADMIN") Color(0xFF10B981) else Color(0xFF3B82F6),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "APP BEHAVIOR & RUNTIME IDENTITY",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                                Text(
+                                    text = "Configure if this build behaves as the Student Study Hub or is locked stand-alone as a dedicated Admin console app.",
+                                    fontSize = 11.sp,
+                                    color = Color.LightGray,
+                                    lineHeight = 15.sp
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(54.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onRoleChange("STUDENT") },
+                                        color = if (currentRole == "STUDENT") Color(0xFF1E3A8A) else Color(0xFF334155),
+                                        border = BorderStroke(
+                                            width = 1.5.dp,
+                                            color = if (currentRole == "STUDENT") Color(0xFF3B82F6) else Color.Transparent
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxSize().padding(6.dp),
+                                            verticalArrangement = Arrangement.Center,
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "STUDENT PORTAL",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "Standard Study App",
+                                                fontSize = 8.sp,
+                                                color = Color.LightGray
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(54.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onRoleChange("ADMIN") },
+                                        color = if (currentRole == "ADMIN") Color(0xFF064E3B) else Color(0xFF334155),
+                                        border = BorderStroke(
+                                            width = 1.5.dp,
+                                            color = if (currentRole == "ADMIN") Color(0xFF10B981) else Color.Transparent
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.fillMaxSize().padding(6.dp),
+                                            verticalArrangement = Arrangement.Center,
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "ADMIN HUB MODE",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "Standalone Admin App",
+                                                fontSize = 8.sp,
+                                                color = Color.LightGray
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = if (currentRole == "ADMIN") Color(0xFF0F2D24) else Color(0xFF1F2937)),
+                                    border = BorderStroke(1.dp, if (currentRole == "ADMIN") Color(0xFF10B981).copy(alpha = 0.3f) else Color.White.copy(alpha = 0.1f))
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = if (currentRole == "ADMIN") "⚠️ DEPLOYED AS STANDALONE ADMIN HUB" else "ℹ️ RUNNING COMPANION CLIENT",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (currentRole == "ADMIN") Color(0xFF10B981) else Color(0xFF9CA3AF),
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = if (currentRole == "ADMIN") {
+                                                "This build is calibrated as a standalone Admin App. The student home, catalogs, details, and paywalls are completely hidden, starting immediately to the administrative biometric scanning launcher shield. Hitting back will safely exit the panel activity."
+                                            } else {
+                                                "This build functions normally as the Nursing Study Companion. Administrators can enter the hidden settings by clicking the top bar logo 5 times, then turning on Standalone mode."
+                                            },
+                                            fontSize = 10.sp,
+                                            color = Color.LightGray,
+                                            lineHeight = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Config section
                         AdminSectionCard(title = "1. BASE CONFIGURATION & PAYWALL") {
                             OutlinedTextField(value = appNameInput.value, onValueChange = { appNameInput.value = it }, label = { Text("APP DISPLAY NAME", fontSize = 10.sp) }, modifier = Modifier.fillMaxWidth())
@@ -4754,7 +4907,7 @@ fun AdminConsoleScreen(
                                 OutlinedTextField(
                                     value = helpLinkInput.value,
                                     onValueChange = { helpLinkInput.value = it },
-                                    label = { Text("TELEGRAM / PHONE HELP LINK", fontSize = 10.sp) },
+                                    label = { Text("SUPPORT EMAIL (e.g. Mailto:email@domain.com)", fontSize = 10.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
                                 Button(
@@ -5964,7 +6117,7 @@ fun AdminConsoleScreen(
                         }
 
                         // Broadcast ticker list feed
-                        Text("ACTIVE LIVE TELEGRAM NEWS ALERTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+                        Text("ACTIVE LIVE STUDENT NEWS ALERTS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             database.announcements.forEach { announce ->
                                 val cardColor = when (announce.type) {
@@ -7904,6 +8057,38 @@ fun uploadApkToCloud(
 }
 
 // ==========================================
+// CENTRALIZED GMAIL SUPPORT OPENER (DIRECT TO GMAIL INSTEAD OF EXTERNAL LINK FALLBACKS)
+// ==========================================
+fun openSupportGmail(context: Context, database: RGUHSDatabase) {
+    val config = database.appConfig
+    val helpLinkStr = config.helpLink.trim()
+    val isHelpEmail = helpLinkStr.contains("@") && !helpLinkStr.startsWith("http", ignoreCase = true)
+    
+    val emailToUse = if (isHelpEmail) {
+        helpLinkStr.replace("mailto:", "", ignoreCase = true).trim()
+    } else if (config.recoveryEmail.isNotBlank()) {
+        config.recoveryEmail.trim()
+    } else {
+        "admin@rguhsnursing.com"
+    }
+
+    val mailtoUri = "mailto:$emailToUse"
+    try {
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse(mailtoUri))
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    } catch (e: Exception) {
+         try {
+             val viewIntent = Intent(Intent.ACTION_VIEW, Uri.parse(mailtoUri))
+             viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+             context.startActivity(viewIntent)
+         } catch (e2: Exception) {
+             Toast.makeText(context, "Could not open email application: ${e2.localizedMessage}", Toast.LENGTH_LONG).show()
+         }
+    }
+}
+
+// ==========================================
 // ACCESSIBLE & SECURE WEBLINK OPENER (FIXES CRASH FOR GUESTS & STUDENTS)
 // ==========================================
 fun safeOpenLink(context: Context, urlString: String?) {
@@ -7912,15 +8097,18 @@ fun safeOpenLink(context: Context, urlString: String?) {
         Toast.makeText(context, "Support services not configured by admin.", Toast.LENGTH_SHORT).show()
         return
     }
-    // Safety check: if administrator mistakenly configured email/gmail in helpLink field, fallback to official help link website
-    val isEmail = rawUrl.contains("@") && !rawUrl.startsWith("http", ignoreCase = true)
-    val targetUrl = if (isEmail) "https://t.me/rguhs_nursing" else rawUrl
 
-    val formattedUrl = if (!targetUrl.startsWith("http://", ignoreCase = true) && !targetUrl.startsWith("https://", ignoreCase = true)) {
-        "https://$targetUrl"
+    // Formatted support link (supports http, https, mailto packages)
+    val formattedUrl = if (rawUrl.startsWith("mailto:", ignoreCase = true)) {
+        rawUrl
+    } else if (rawUrl.contains("@") && !rawUrl.startsWith("http", ignoreCase = true)) {
+        "mailto:$rawUrl"
+    } else if (!rawUrl.startsWith("http://", ignoreCase = true) && !rawUrl.startsWith("https://", ignoreCase = true)) {
+        "https://$rawUrl"
     } else {
-        targetUrl
+        rawUrl
     }
+
     try {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(formattedUrl))
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -8105,6 +8293,26 @@ fun SupportHelpDialog(
 ) {
     if (!isOpen) return
     val context = LocalContext.current
+
+    // Resolve Telegram Link
+    val configuredHelpLink = appConfig.helpLink.trim()
+    val isHelpLinkEmail = configuredHelpLink.contains("@") && !configuredHelpLink.startsWith("http", ignoreCase = true)
+
+    val telegramUrl = if (configuredHelpLink.isNotBlank() && !isHelpLinkEmail) {
+        configuredHelpLink
+    } else {
+        "https://t.me/rguhs_nursing"
+    }
+
+    // Resolve Support Email address
+    val supportEmail = if (isHelpLinkEmail) {
+        configuredHelpLink.replace("mailto:", "", ignoreCase = true)
+    } else if (appConfig.recoveryEmail.isNotBlank()) {
+        appConfig.recoveryEmail.trim()
+    } else {
+        "admin@rguhsnursing.com"
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -8119,7 +8327,7 @@ fun SupportHelpDialog(
                     modifier = Modifier.size(24.dp)
                 )
                 Text(
-                    text = "Help & Support Options",
+                    text = "Help & Support Center",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.DarkGray
@@ -8132,18 +8340,16 @@ fun SupportHelpDialog(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             ) {
                 Text(
-                    text = "Contact our administrator using the official helpline/support link below for instant account assistance, password recovery, or student support:",
+                    text = "Need help with past papers, study guides, unlocking syllabus contents, or account recovery? Choose your preferred support method below:",
                     fontSize = 11.sp,
                     color = Color.Gray,
                     lineHeight = 16.sp
                 )
 
-                // Help link (Official helpline)
+                // 1. TELEGRAM HELPLINE CARD
                 Surface(
                     modifier = Modifier.clickable {
-                        val helpUrl = appConfig.helpLink.trim()
-                        val finalUrl = if (helpUrl.isBlank() || (helpUrl.contains("@") && !helpUrl.startsWith("http", ignoreCase = true))) "https://t.me/rguhs_nursing" else helpUrl
-                        safeOpenLink(context, finalUrl)
+                        safeOpenLink(context, telegramUrl)
                     },
                     shape = RoundedCornerShape(12.dp),
                     color = Color(0xFFEFF6FF),
@@ -8158,23 +8364,59 @@ fun SupportHelpDialog(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(36.dp)
                                 .background(Color(0xFF3B82F6).copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Message,
-                                contentDescription = "Official Helpline",
+                                contentDescription = "Telegram Support",
                                 tint = Color(0xFF2563EB),
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Official Helpline / Support Link", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E3A8A))
-                            val displayUrl = if (appConfig.helpLink.isBlank() || (appConfig.helpLink.contains("@") && !appConfig.helpLink.startsWith("http", ignoreCase = true))) "https://t.me/rguhs_nursing" else appConfig.helpLink
-                            Text("Click to open admin support: $displayUrl", fontSize = 9.sp, color = Color(0xFF3B82F6))
+                            Text("Official Telegram Support", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E3A8A))
+                            Text("Open official telegram helpline chat group", fontSize = 9.sp, color = Color(0xFF3B82F6))
                         }
                         Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Go", tint = Color(0xFF2563EB), modifier = Modifier.size(16.dp))
+                    }
+                }
+
+                // 2. EMAIL SUPPORT CARD
+                Surface(
+                    modifier = Modifier.clickable {
+                        safeOpenLink(context, "mailto:$supportEmail")
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFEFFDF4),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFF10B981).copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Email,
+                                contentDescription = "Email Support",
+                                tint = Color(0xFF059669),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Official Email Helpline", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF064E3B))
+                            Text("Write to: $supportEmail", fontSize = 9.sp, color = Color(0xFF059669))
+                        }
+                        Icon(imageVector = Icons.Default.ChevronRight, contentDescription = "Go", tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
                     }
                 }
             }
