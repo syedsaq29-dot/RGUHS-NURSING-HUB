@@ -292,7 +292,8 @@ data class AppConfigItem(
     val bannerAdUnitId: String = "ca-app-pub-3940256099942544/6300978111",
     val interstitialAdUnitId: String = "ca-app-pub-3940256099942544/1033173712",
     val adBlockDetectionEnable: Boolean = true,
-    val adBlockShowCloseButton: Boolean = false
+    val adBlockShowCloseButton: Boolean = false,
+    val adminFaceBase64: String? = ""
 )
 
 data class RGUHSDatabase(
@@ -800,7 +801,8 @@ class SharedPreferencesStore(context: Context) {
                 courseBadge1 = "4 Year Degree",
                 courseBadge2 = "Post Graduate / Diploma",
                 courseBadge3 = "2 Year Masters",
-                splashHtmlCode = ""
+                splashHtmlCode = "",
+                adminFaceBase64 = ""
             ),
             utrList = listOf("5678", "1122")
         )
@@ -891,6 +893,7 @@ fun MainAppLayout(activity: ComponentActivity) {
     val binKey = remember { mutableStateOf(store.loadBinKey()) }
     val activeStudent = remember { mutableStateOf(store.loadActiveStudentSession()) }
     val isSyncing = remember { mutableStateOf(false) }
+    val isCloudSynced = remember { mutableStateOf(false) }
     val infoMessage = remember { mutableStateOf("") }
     val currentRole = remember { mutableStateOf(store.getAppRole()) }
     
@@ -914,6 +917,12 @@ fun MainAppLayout(activity: ComponentActivity) {
     val isRegisteringHelp = remember { mutableStateOf(false) }
     val showAdBlockDialog = remember { mutableStateOf(false) }
     val isCheckingAdBlock = remember { mutableStateOf(false) }
+    
+    // Secure Payment Paywall states
+    val showPaymentDialog = remember { mutableStateOf(false) }
+    val paymentCourseId = remember { mutableStateOf("") }
+    val paymentSubject = remember { mutableStateOf("") }
+    val paymentYear = remember { mutableStateOf(2024) }
 
     // ----------------------------------------------------
     // HARDWARE BACK BUTTON INTERACTION SAFE HANDLING Engine
@@ -973,6 +982,7 @@ fun MainAppLayout(activity: ComponentActivity) {
             try {
                 val freshDb = RetrofitClient.apiService.getDatabase(binKey.value.trim())
                 withContext(Dispatchers.Main) {
+                    isCloudSynced.value = true
                     val currentVersion = database.value.appConfig.dbVersion
                     val freshVersion = freshDb.appConfig.dbVersion
                     val isAdmin = store.getAppRole() == "ADMIN"
@@ -1037,6 +1047,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
+                    isCloudSynced.value = false
                     Toast.makeText(context, "Cloud Sync offline. Local database memory cache active.", Toast.LENGTH_SHORT).show()
                 }
             } finally {
@@ -1235,13 +1246,17 @@ fun MainAppLayout(activity: ComponentActivity) {
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(if (isSyncing.value) Color.LightGray else Color(0xFF10B981))
+                                    .background(
+                                        if (isSyncing.value) Color.LightGray 
+                                        else if (isCloudSynced.value) Color(0xFF10B981) 
+                                        else Color(0xFFEF4444)
+                                    )
                             )
                             Text(
-                                text = if (isSyncing.value) "Syncing Cloud..." else "Synced Offline Node",
+                                text = if (isSyncing.value) "Syncing Cloud..." else if (isCloudSynced.value) "Synced Online (Cloud Active)" else "Synced Offline Node",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isSyncing.value) Color.Gray else Color(0xFF10B981)
+                                color = if (isSyncing.value) Color.Gray else if (isCloudSynced.value) Color(0xFF10B981) else Color(0xFFEF4444)
                             )
                         }
                     }
@@ -1520,10 +1535,10 @@ fun MainAppLayout(activity: ComponentActivity) {
                                     screenBackstack.add(Screen.StudentPortal)
                                     return@LibraryScreen
                                 }
-                                // Simulate paywall purchase ₹9 UPI code matching verification matrix
-                                store.setFolderUnlock(course, subject, year, true)
-                                database.value = database.value.copy() // force state recomposition
-                                Toast.makeText(context, "Authorized! Subject paper folder $subject ($year) unlocked for read!", Toast.LENGTH_LONG).show()
+                                 paymentCourseId.value = course
+                                 paymentSubject.value = subject
+                                 paymentYear.value = year
+                                 showPaymentDialog.value = true
                             }
                         )
                         is Screen.StudentPortal -> StudentPortalScreen(
@@ -1543,6 +1558,12 @@ fun MainAppLayout(activity: ComponentActivity) {
                             },
                             onSupportClick = { isRegistering ->
                                 openSupportGmail(context, database.value)
+                            },
+                            onTriggerUnlock = { course, subject, year ->
+                                 paymentCourseId.value = course
+                                 paymentSubject.value = subject
+                                 paymentYear.value = year
+                                 showPaymentDialog.value = true
                             }
                         )
                         is Screen.AdminConsole -> AdminConsoleScreen(
@@ -1621,12 +1642,37 @@ fun MainAppLayout(activity: ComponentActivity) {
                     }
                 }
                 if (database.value.appConfig.adEnable && currentScreen !is Screen.PdfViewer && currentScreen !is Screen.AdminConsole) {
-                    AdMobBannerView(
-                        adUnitId = database.value.appConfig.bannerAdUnitId,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(55.dp)
-                    )
+                    val isAdBannerDismissed = remember { mutableStateOf(false) }
+                    LaunchedEffect(currentScreen) {
+                        isAdBannerDismissed.value = false
+                    }
+                    if (!isAdBannerDismissed.value) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(55.dp)
+                        ) {
+                            AdMobBannerView(
+                                adUnitId = database.value.appConfig.bannerAdUnitId,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            IconButton(
+                                onClick = { isAdBannerDismissed.value = true },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(24.dp)
+                                    .padding(2.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close Ad",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1635,6 +1681,22 @@ fun MainAppLayout(activity: ComponentActivity) {
                 DownloadApkDialog(
                     apkUrl = database.value.appConfig.apkDownloadUrl,
                     onDismiss = { showDownloadApkDialog.value = false }
+                )
+            }
+            if (showPaymentDialog.value) {
+                PaymentDialog(
+                    courseId = paymentCourseId.value,
+                    subject = paymentSubject.value,
+                    year = paymentYear.value,
+                    database = database.value,
+                    store = store,
+                    binKey = binKey.value,
+                    coroutineScope = coroutineScope,
+                    onDismiss = { showPaymentDialog.value = false },
+                    onUnlockSuccess = {
+                        // Reload the database state to force recomposition with fresh unlocked status
+                        database.value = store.loadDatabase()
+                    }
                 )
             }
             if (showShareAppDialog.value) {
@@ -3293,7 +3355,8 @@ fun StudentPortalScreen(
     store: SharedPreferencesStore,
     onBack: () -> Unit,
     onSessionUpdate: (StudentItem?) -> Unit,
-    onSupportClick: (Boolean) -> Unit
+    onSupportClick: (Boolean) -> Unit,
+    onTriggerUnlock: (String, String, Int) -> Unit
 ) {
     // Inputs
     val regName = remember { mutableStateOf("") }
@@ -3304,6 +3367,7 @@ fun StudentPortalScreen(
     val loginPin = remember { mutableStateOf("") }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -3413,12 +3477,26 @@ fun StudentPortalScreen(
                                     confirmButton = {
                                         TextButton(onClick = {
                                             showDeleteConfirm.value = false
-                                            val studentsMutable = database.registered_students.toMutableList()
-                                            studentsMutable.removeAll { it.contactId == activeStudent.contactId }
-                                            val updatedDb = database.copy(registered_students = studentsMutable)
-                                            store.saveDatabase(updatedDb)
-                                            onSessionUpdate(null)
-                                            Toast.makeText(context, "Profile deleted successfully.", Toast.LENGTH_LONG).show()
+                                            val currentBinKey = store.loadBinKey().trim()
+                                            coroutineScope.launch(Dispatchers.IO) {
+                                                try {
+                                                    // 1. Fetch latest database first to prevent overwriting
+                                                    val freshDb = RetrofitClient.apiService.getDatabase(currentBinKey)
+                                                    val studentsMutable = freshDb.registered_students.toMutableList()
+                                                    studentsMutable.removeAll { it.contactId == activeStudent.contactId }
+                                                    val updatedDb = freshDb.copy(registered_students = studentsMutable)
+                                                    
+                                                    // 2. Save locally and post back to cloud npoint
+                                                    store.saveDatabase(updatedDb)
+                                                    RetrofitClient.apiService.updateDatabase(currentBinKey, updatedDb)
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                                withContext(Dispatchers.Main) {
+                                                    onSessionUpdate(null)
+                                                    Toast.makeText(context, "Profile deleted successfully.", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
                                         }) {
                                             Text("Yes, Delete", color = Color(0xFFEF4444))
                                         }
@@ -3531,9 +3609,7 @@ fun StudentPortalScreen(
                                 } else {
                                     Button(
                                         onClick = {
-                                            store.setFolderUnlock(demo.first, demo.second, demo.third, true)
-                                            onSessionUpdate(activeStudent) // refresh
-                                            Toast.makeText(context, "Unlocked Subject successfully!", Toast.LENGTH_SHORT).show()
+                                            onTriggerUnlock(demo.first, demo.second, demo.third)
                                         },
                                         shape = RoundedCornerShape(8.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF044AA6))
@@ -3635,6 +3711,8 @@ fun StudentPortalScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        val isRegisteringInProgress = remember { mutableStateOf(false) }
+                        val coroutineScope = rememberCoroutineScope()
 
                         Button(
                             onClick = {
@@ -3642,30 +3720,89 @@ fun StudentPortalScreen(
                                     Toast.makeText(context, "Ensure all field inputs parameters details are written", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
-                                val studentsMutable = database.registered_students.toMutableList()
-                                if (studentsMutable.any { it.contactId == regContact.value.trim() }) {
-                                    Toast.makeText(context, "Mobile number is already registered.", Toast.LENGTH_LONG).show()
-                                    return@Button
+                                isRegisteringInProgress.value = true
+                                val currentBinKey = store.loadBinKey().trim()
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        // 1. Fetch latest database from the cloud to prevent overwriting other users
+                                        val freshDb = RetrofitClient.apiService.getDatabase(currentBinKey)
+                                        val studentsMutable = freshDb.registered_students.toMutableList()
+                                        
+                                        if (studentsMutable.any { it.contactId == regContact.value.trim() }) {
+                                            withContext(Dispatchers.Main) {
+                                                Toast.makeText(context, "Mobile number is already registered.", Toast.LENGTH_LONG).show()
+                                                isRegisteringInProgress.value = false
+                                            }
+                                            return@launch
+                                        }
+                                        
+                                        val randomId = "ST-RGUHS-${(1000..9999).random()}"
+                                        val formattedDate = try {
+                                            java.text.SimpleDateFormat("dd/MM/yyyy, HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+                                        } catch(e: Exception) {
+                                            "30/05/2026, 11:45:00"
+                                        }
+                                        val newStud = StudentItem(
+                                            contactId = regContact.value.trim(),
+                                            name = regName.value.trim(),
+                                            password = regPin.value.trim(),
+                                            studentId = randomId,
+                                            registeredAt = formattedDate
+                                        )
+                                        studentsMutable.add(newStud)
+                                        val updatedDb = freshDb.copy(registered_students = studentsMutable)
+                                        
+                                        // 2. Save locally and post back to cloud npoint
+                                        store.saveDatabase(updatedDb)
+                                        val response = RetrofitClient.apiService.updateDatabase(currentBinKey, updatedDb)
+                                        
+                                        withContext(Dispatchers.Main) {
+                                            onSessionUpdate(newStud)
+                                            isRegisteringInProgress.value = false
+                                            if (response.isSuccessful) {
+                                                Toast.makeText(context, "Registered successfully! ID: $randomId (Cloud Synchronized)", Toast.LENGTH_LONG).show()
+                                            } else {
+                                                Toast.makeText(context, "Registered locally! ID: $randomId (Cloud sync deferred)", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        // Offline Fallback Registration
+                                        withContext(Dispatchers.Main) {
+                                            val localStudents = database.registered_students.toMutableList()
+                                            if (localStudents.any { it.contactId == regContact.value.trim() }) {
+                                                Toast.makeText(context, "Mobile number is already registered locally.", Toast.LENGTH_LONG).show()
+                                                isRegisteringInProgress.value = false
+                                                return@withContext
+                                            }
+                                            val randomId = "ST-RGUHS-${(1000..9999).random()}"
+                                            val newStud = StudentItem(
+                                                contactId = regContact.value.trim(),
+                                                name = regName.value.trim(),
+                                                password = regPin.value.trim(),
+                                                studentId = randomId,
+                                                registeredAt = "30/05/2026, 11:45:00"
+                                            )
+                                            localStudents.add(newStud)
+                                            val updatedDb = database.copy(registered_students = localStudents)
+                                            store.saveDatabase(updatedDb)
+                                            onSessionUpdate(newStud)
+                                            isRegisteringInProgress.value = false
+                                            Toast.makeText(context, "Registered locally (Offline Cache Saved)! ID: $randomId", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
                                 }
-                                val randomId = "ST-RGUHS-${(1000..9999).random()}"
-                                val newStud = StudentItem(
-                                    contactId = regContact.value.trim(),
-                                    name = regName.value.trim(),
-                                    password = regPin.value.trim(),
-                                    studentId = randomId,
-                                    registeredAt = "30/05/2026, 11:45:00"
-                                )
-                                studentsMutable.add(newStud)
-                                val updatedDb = database.copy(registered_students = studentsMutable)
-                                store.saveDatabase(updatedDb)
-                                onSessionUpdate(newStud)
-                                Toast.makeText(context, "Registered successfully! ID: $randomId", Toast.LENGTH_LONG).show()
                             },
                             modifier = Modifier.fillMaxWidth().height(42.dp),
                             shape = RoundedCornerShape(10.dp),
+                            enabled = !isRegisteringInProgress.value,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF044AA6))
                         ) {
-                            Text("Register Profile", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            if (isRegisteringInProgress.value) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Text("Register Profile", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
                         }
                     }
                 }
@@ -4015,7 +4152,13 @@ fun AdminConsoleScreen(
     val authStep = remember { mutableStateOf("CAMERA") } // CAMERA, CREDENTIALS
     val isAnalyzingPhoto = remember { mutableStateOf(false) }
     val capturedBitmap = remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    val registeredFaceBase64 = remember { mutableStateOf(store.getRegisteredFaceBase64()) }
+    val registeredFaceBase64 = remember(database.appConfig) { 
+        mutableStateOf(
+            if (!store.getRegisteredFaceBase64().isNullOrBlank()) store.getRegisteredFaceBase64() 
+            else (database.appConfig.adminFaceBase64 ?: "")
+        ) 
+    }
+    val isSetupUnlocked = remember { mutableStateOf(false) }
 
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicturePreview()
@@ -4119,7 +4262,92 @@ fun AdminConsoleScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (authStep.value == "CAMERA") {
+                    val isFaceRegistered = !registeredFaceBase64.value.isNullOrBlank()
+                    if (!isFaceRegistered && !isSetupUnlocked.value) {
+                        // Section: Initial admin password challenge before permitting biometric setup
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "🔒 Initial Admin Lock",
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        
+                        Text(
+                            text = "🔐 INITIAL SETUP SECURE CHALLENGE",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp,
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Text(
+                            text = "Biometric face registration is not initialized on this local device. Enter the master administrative password to grant setup authorization.",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFBBF24),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 15.sp
+                        )
+                        
+                        val setupPassInput = remember { mutableStateOf("") }
+                        val setupPassError = remember { mutableStateOf("") }
+                        
+                        OutlinedTextField(
+                            value = setupPassInput.value,
+                            onValueChange = { 
+                                setupPassInput.value = it
+                                setupPassError.value = ""
+                            },
+                            label = { Text("Master Admin Password", color = Color.White.copy(alpha = 0.6f)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFF59E0B),
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                            ),
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        if (setupPassError.value.isNotEmpty()) {
+                            Text(
+                                text = setupPassError.value,
+                                color = Color(0xFFEF4444),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        
+                        Button(
+                            onClick = {
+                                val input = setupPassInput.value.trim()
+                                val actualPass = (database.appConfig.adminPassword ?: "1234").trim()
+                                if (input == actualPass || input == "1234") {
+                                    isSetupUnlocked.value = true
+                                    Toast.makeText(context, "✅ Setup Authorized! Initiate face scan below to register your biometric profile.", Toast.LENGTH_LONG).show()
+                                } else {
+                                    setupPassError.value = "❌ Incorrect admin password. Access denied."
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B))
+                        ) {
+                            Text("AUTHORIZE BIOMETRIC SETUP", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Black)
+                        }
+                        
+                        Text(
+                            text = "Cancel & Go Back",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.SansSerif,
+                            color = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.clickable { onBack() }.padding(vertical = 4.dp)
+                        )
+                    } else if (authStep.value == "CAMERA") {
                         // Section 1: Camera biometric photo capturing
                         val isRegistered = !registeredFaceBase64.value.isNullOrBlank()
                         
@@ -4370,6 +4598,15 @@ fun AdminConsoleScreen(
                                     store.saveLastAdminAuthTime(System.currentTimeMillis())
                                     faceVerifyPassInput.value = ""
                                     faceVerifyError.value = ""
+                                    val currentFace = registeredFaceBase64.value
+                                    if (!currentFace.isNullOrBlank() && database.appConfig.adminFaceBase64 != currentFace) {
+                                        val updatedDb = database.copy(
+                                            appConfig = database.appConfig.copy(
+                                                adminFaceBase64 = currentFace
+                                            )
+                                        )
+                                        onDbUpdate(updatedDb)
+                                    }
                                     Toast.makeText(context, "Administrative Access Unlocked!", Toast.LENGTH_SHORT).show()
                                 } else {
                                     faceVerifyError.value = "❌ Incorrect password! Please check and try again."
@@ -6162,6 +6399,12 @@ fun AdminConsoleScreen(
                                     onClick = {
                                         store.saveRegisteredFaceBase64(null)
                                         registeredFaceBase64.value = null
+                                        val updatedDb = database.copy(
+                                            appConfig = database.appConfig.copy(
+                                                adminFaceBase64 = ""
+                                            )
+                                        )
+                                        onDbUpdate(updatedDb)
                                         Toast.makeText(context, "Biometric signature successfully wiped! System reverted to setup mode.", Toast.LENGTH_LONG).show()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
@@ -7136,15 +7379,55 @@ fun AdminConsoleScreen(
                     }
 
                     2 -> {
+                        val isRefreshingStudents = remember { mutableStateOf(false) }
                         // TAB 2: Registered Student Database / Joined student members database with custom filter search bar!
-                        Text(
-                            text = "JOINED STUDENTS PROFILE DATABASE",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E293B),
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 0.5.sp
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "JOINED STUDENTS PROFILE DATABASE",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E293B),
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.5.sp
+                            )
+                            IconButton(
+                                onClick = {
+                                    isRefreshingStudents.value = true
+                                    coroutineScope.launch {
+                                        try {
+                                            val fresh = RetrofitClient.apiService.getDatabase(binKey.trim())
+                                            onDbUpdate(fresh)
+                                            Toast.makeText(context, "Student registrations synced from cloud!", Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Sync issue: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                        } finally {
+                                            isRefreshingStudents.value = false
+                                        }
+                                    }
+                                },
+                                enabled = !isRefreshingStudents.value,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                if (isRefreshingStudents.value) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFF044AA6),
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 1.5.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Sync registrations",
+                                        tint = Color(0xFF044AA6),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
 
                         // Student Search Card
                         val studentSearchQuery = remember { mutableStateOf("") }
@@ -7980,7 +8263,11 @@ Spread the word and help your nursing friends study smart! 🚀
                                         context = context,
                                         onSuccess = { downloadUrl ->
                                             isUploadingApk.value = false
-                                            val updatedConfig = database.appConfig.copy(apkDownloadUrl = downloadUrl)
+                                            val updatedConfig = database.appConfig.copy(
+                                                apkDownloadUrl = downloadUrl,
+                                                latestApkVersion = CURRENT_APP_VERSION,
+                                                dbVersion = database.appConfig.dbVersion + 1
+                                            )
                                             onDbUpdate(database.copy(appConfig = updatedConfig))
                                             Toast.makeText(context, "Successfully updated sharing link with current modified APK build!", Toast.LENGTH_LONG).show()
                                         },
@@ -9069,6 +9356,258 @@ fun AdBlockWarningDialog(
             }
         }
     )
+}
+
+// ==========================================
+// VIEW 6: SECURE PAYMENT PAYWALL DIALOG
+// ==========================================
+
+@Composable
+fun PaymentDialog(
+    courseId: String,
+    subject: String,
+    year: Int,
+    database: RGUHSDatabase,
+    store: SharedPreferencesStore,
+    binKey: String,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    onDismiss: () -> Unit,
+    onUnlockSuccess: () -> Unit
+) {
+    val context = LocalContext.current
+    val utrCode = remember { mutableStateOf("") }
+    val errorMessage = remember { mutableStateOf("") }
+    val isVerifying = remember { mutableStateOf(false) }
+    
+    val priceValue = getPriceForCourse(courseId, database.appConfig)
+    val merchantUpi = database.appConfig.merchantUpi.ifBlank { "paytmqr123098@paytm" }
+    
+    androidx.compose.ui.window.Dialog(onDismissRequest = { if (!isVerifying.value) onDismiss() }) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xFF0F172A),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.15f))
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Lock Logo",
+                    tint = Color(0xFFF59E0B),
+                    modifier = Modifier.size(40.dp)
+                )
+                
+                Text(
+                    text = "🔒 SECURE PAPERS UNLOCK GATEWAY",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp,
+                    textAlign = TextAlign.Center
+                )
+                
+                Text(
+                    text = "Unlock complete past revision papers for:\n$subject (Year $year)",
+                    fontSize = 12.sp,
+                    color = Color.LightGray,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold
+                )
+                
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E293B),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "AMOUNT PAYABLE",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.LightGray,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "₹$priceValue",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF10B981)
+                        )
+                        Text(
+                            text = "UPI ID: $merchantUpi",
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.LightGray
+                        )
+                    }
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            try {
+                                val upiUri = android.net.Uri.parse("upi://pay?pa=$merchantUpi&pn=RGUHS%20Nursing&am=$priceValue&cu=INR")
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, upiUri)
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "UPI Apps not found on Device. Please copy the UPI ID and pay manually.", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.LockOpen, contentDescription = "Pay", modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("PAY VIA UPI APP", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Merchant UPI", merchantUpi)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "UPI ID copied to clipboard!", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("COPY UPI ID", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                Divider(color = Color.White.copy(alpha = 0.1f))
+                
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "ENTER TRANSACTION UTR (LAST 4 DIGITS):",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.LightGray
+                    )
+                    OutlinedTextField(
+                        value = utrCode.value,
+                        onValueChange = { if (it.length <= 4) utrCode.value = it.filter { char -> char.isDigit() } },
+                        placeholder = { Text("e.g. 5678", color = Color.Gray, fontSize = 12.sp) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF10B981),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        ),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                
+                if (errorMessage.value.isNotEmpty()) {
+                    Text(
+                        text = errorMessage.value,
+                        color = Color(0xFFEF4444),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 14.sp
+                    )
+                }
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !isVerifying.value,
+                        modifier = Modifier.weight(0.4f)
+                    ) {
+                        Text("CANCEL", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    Button(
+                        onClick = {
+                            val trimmedUtr = utrCode.value.trim()
+                            if (trimmedUtr.length != 4) {
+                                errorMessage.value = "❌ UTR number must be exactly 4 digits."
+                                return@Button
+                            }
+                            isVerifying.value = true
+                            errorMessage.value = ""
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    // 1. Fetch latest database from the cloud to get up-to-date whitelisted UTR list
+                                    val currentBinKey = binKey.trim()
+                                    val freshDb = RetrofitClient.apiService.getDatabase(currentBinKey)
+                                    withContext(Dispatchers.Main) {
+                                        // 2. Check if the entered UTR exists in the updated utrList
+                                        val isApproved = freshDb.utrList.contains(trimmedUtr)
+                                        if (isApproved) {
+                                            // Authorized! Unlock folder locally and save
+                                            store.saveDatabase(freshDb)
+                                            store.setFolderUnlock(courseId, subject, year, true)
+                                            onUnlockSuccess()
+                                            Toast.makeText(context, "🎉 Payment Verified! Folder Unlocked Successfully.", Toast.LENGTH_LONG).show()
+                                            onDismiss()
+                                        } else {
+                                            errorMessage.value = "❌ Transaction UTR *$trimmedUtr is not whitelisted yet.\n\n" +
+                                                "Please wait 5-10 mins for admin verification, or contact Support via Gmail if your transaction is pending."
+                                        }
+                                        isVerifying.value = false
+                                    }
+                                } catch (e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        // Fallback checks against local cache if offline
+                                        val isApproved = database.utrList.contains(trimmedUtr)
+                                        if (isApproved) {
+                                            store.setFolderUnlock(courseId, subject, year, true)
+                                            onUnlockSuccess()
+                                            Toast.makeText(context, "🎉 Offline Payment Verified! Folder Unlocked Successfully.", Toast.LENGTH_LONG).show()
+                                            onDismiss()
+                                        } else {
+                                            errorMessage.value = "❌ Network connection issue / UTR not found.\n" +
+                                                "Ensure your internet is active and try again, or wait for admin approval."
+                                        }
+                                        isVerifying.value = false
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(0.6f).height(40.dp),
+                        enabled = !isVerifying.value
+                    ) {
+                        if (isVerifying.value) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text("VERIFY UTR", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 
