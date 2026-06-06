@@ -114,7 +114,7 @@ data class AnnouncementItem(
     val text: String
 )
 
-const val CURRENT_APP_VERSION = 39
+const val CURRENT_APP_VERSION = 44
 
 fun isRunningOnEmulator(): Boolean {
     val brand = android.os.Build.BRAND
@@ -287,7 +287,12 @@ data class AppConfigItem(
     val customBorderColorHex: String = "#044AA6",
     val customBgColorHex: String = "#0F172A",
     val customGradientStartHex: String = "#0F172A",
-    val customGradientEndHex: String = "#1E293B"
+    val customGradientEndHex: String = "#1E293B",
+    val adEnable: Boolean = true,
+    val bannerAdUnitId: String = "ca-app-pub-3940256099942544/6300978111",
+    val interstitialAdUnitId: String = "ca-app-pub-3940256099942544/1033173712",
+    val adBlockDetectionEnable: Boolean = true,
+    val adBlockShowCloseButton: Boolean = false
 )
 
 data class RGUHSDatabase(
@@ -551,6 +556,16 @@ class SharedPreferencesStore(context: Context) {
         } else {
             prefs.edit().putString("registered_face_base64", base64).apply()
         }
+    }
+
+    fun isAdminAuthValid(): Boolean {
+        val lastAuth = prefs.getLong("last_admin_auth_time_v2", 0L)
+        val elapsed = System.currentTimeMillis() - lastAuth
+        return lastAuth > 0L && elapsed < 10 * 60 * 1000L // 10 minutes cache window
+    }
+
+    fun saveLastAdminAuthTime(time: Long) {
+        prefs.edit().putLong("last_admin_auth_time_v2", time).apply()
     }
 
     fun loadActiveStudentSession(): StudentItem? {
@@ -829,6 +844,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         clearWindowFlagsSecure()
         enableEdgeToEdge()
+        try {
+            com.google.android.gms.ads.MobileAds.initialize(this) {}
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         setContent {
             MyApplicationTheme {
                 MainAppLayout(this)
@@ -892,6 +912,8 @@ fun MainAppLayout(activity: ComponentActivity) {
     val showShareAppDialog = remember { mutableStateOf(false) }
     val showSupportHelpDialog = remember { mutableStateOf(false) }
     val isRegisteringHelp = remember { mutableStateOf(false) }
+    val showAdBlockDialog = remember { mutableStateOf(false) }
+    val isCheckingAdBlock = remember { mutableStateOf(false) }
 
     // ----------------------------------------------------
     // HARDWARE BACK BUTTON INTERACTION SAFE HANDLING Engine
@@ -923,6 +945,17 @@ fun MainAppLayout(activity: ComponentActivity) {
         AppThemeHolder.updateTheme(database.value.appConfig)
     }
 
+    LaunchedEffect(database.value.appConfig.adEnable, database.value.appConfig.adBlockDetectionEnable) {
+        if (database.value.appConfig.adEnable && database.value.appConfig.adBlockDetectionEnable) {
+            isCheckingAdBlock.value = true
+            val isBlocked = isAdBlockActive(context)
+            showAdBlockDialog.value = isBlocked
+            isCheckingAdBlock.value = false
+        } else {
+            showAdBlockDialog.value = false
+        }
+    }
+
     // Dynamic dynamic colors
     val primaryColor = AppThemeHolder.primaryColor
     val accentGold = AppThemeHolder.accentGold
@@ -942,7 +975,55 @@ fun MainAppLayout(activity: ComponentActivity) {
                 withContext(Dispatchers.Main) {
                     val currentVersion = database.value.appConfig.dbVersion
                     val freshVersion = freshDb.appConfig.dbVersion
-                    if (freshVersion > currentVersion || force) {
+                    val isAdmin = store.getAppRole() == "ADMIN"
+                    
+                    if (isAdmin && CURRENT_APP_VERSION != freshDb.appConfig.latestApkVersion) {
+                        // Admin running a newer build: automatically upload and publish this release to students!
+                        Toast.makeText(context, "📦 Code modifications detected! Automatically building and publishing App Update (v$CURRENT_APP_VERSION) to all students...", Toast.LENGTH_LONG).show()
+                        
+                        uploadApkToCloud(
+                            context = context,
+                            onSuccess = { downloadUrl ->
+                                val nextDbVersion = maxOf(freshVersion, currentVersion) + 1
+                                val autoProgressedDb = freshDb.copy(
+                                    appConfig = freshDb.appConfig.copy(
+                                        latestApkVersion = CURRENT_APP_VERSION,
+                                        apkDownloadUrl = downloadUrl,
+                                        dbVersion = nextDbVersion
+                                    )
+                                )
+                                database.value = autoProgressedDb
+                                store.saveDatabase(autoProgressedDb)
+                                
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        RetrofitClient.apiService.updateDatabase(binKey.value.trim(), autoProgressedDb)
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "🎉 Successfully published and broadcasted physical APK Update v$CURRENT_APP_VERSION to all students!", Toast.LENGTH_LONG).show()
+                                        }
+                                    } catch (e: Exception) {}
+                                }
+                            },
+                            onError = { error ->
+                                // Safe fallback: progress version code so we do not loops on errors
+                                val nextDbVersion = maxOf(freshVersion, currentVersion) + 1
+                                val autoProgressedDb = freshDb.copy(
+                                    appConfig = freshDb.appConfig.copy(
+                                        latestApkVersion = CURRENT_APP_VERSION,
+                                        dbVersion = nextDbVersion
+                                    )
+                                )
+                                database.value = autoProgressedDb
+                                store.saveDatabase(autoProgressedDb)
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        RetrofitClient.apiService.updateDatabase(binKey.value.trim(), autoProgressedDb)
+                                    } catch (e: Exception) {}
+                                }
+                                Toast.makeText(context, "Auto-broadcast deferred: $error", Toast.LENGTH_LONG).show()
+                            }
+                        )
+                    } else if (freshVersion > currentVersion || force) {
                         database.value = freshDb
                         store.saveDatabase(freshDb)
                         Toast.makeText(context, "Portal Sync Finalized with Cloud Database (v$freshVersion)!", Toast.LENGTH_SHORT).show()
@@ -1121,7 +1202,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                             selected = false,
                             onClick = {
                                 coroutineScope.launch { drawerState.close() }
-                                val hasUpdate = false
+                                val hasUpdate = database.value.appConfig.latestApkVersion > CURRENT_APP_VERSION
                                 if (hasUpdate) {
                                     // There is an update! Trigger standard DownloadApkDialog which prompts user update permission.
                                     showDownloadApkDialog.value = true
@@ -1402,6 +1483,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                                  screenBackstack.add(Screen.AdminConsole)
                              },
                              onOpenFile = { title, url ->
+                                 triggerInterstitialAdFlow(context, database.value.appConfig.interstitialAdUnitId, database.value.appConfig.adEnable)
                                  screenBackstack.add(Screen.PdfViewer(title, url))
                              },
                              onUpdateClick = {
@@ -1429,6 +1511,7 @@ fun MainAppLayout(activity: ComponentActivity) {
                             },
                             onOpenFile = { title, url ->
                                 // Clean navigation to PDF Screen with backstack protection
+                                triggerInterstitialAdFlow(context, database.value.appConfig.interstitialAdUnitId, database.value.appConfig.adEnable)
                                 screenBackstack.add(Screen.PdfViewer(title, url))
                             },
                             onTriggerUnlock = { course, subject, year ->
@@ -1477,7 +1560,9 @@ fun MainAppLayout(activity: ComponentActivity) {
                                 // 1. Automatically increment database payload version before publishing!
                                 val newVersion = updatedDb.appConfig.dbVersion + 1
                                 val finalizedDb = updatedDb.copy(
-                                    appConfig = updatedDb.appConfig.copy(dbVersion = newVersion)
+                                    appConfig = updatedDb.appConfig.copy(
+                                        dbVersion = newVersion
+                                    )
                                 )
                                 
                                 // 2. Update local state & SharedPreferences on administrator's terminal
@@ -1535,6 +1620,14 @@ fun MainAppLayout(activity: ComponentActivity) {
                         )
                     }
                 }
+                if (database.value.appConfig.adEnable && currentScreen !is Screen.PdfViewer && currentScreen !is Screen.AdminConsole) {
+                    AdMobBannerView(
+                        adUnitId = database.value.appConfig.bannerAdUnitId,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(55.dp)
+                    )
+                }
             }
         }
     }
@@ -1550,8 +1643,12 @@ fun MainAppLayout(activity: ComponentActivity) {
                     webUrl = "https://ais-pre-hqudo75kzd2grkycrsb6jq-4601153368.asia-east1.run.app",
                     onDbUpdate = { updatedDb ->
                         val newVersion = updatedDb.appConfig.dbVersion + 1
+                        val autoApkVersion = maxOf(updatedDb.appConfig.latestApkVersion, CURRENT_APP_VERSION)
                         val finalizedDb = updatedDb.copy(
-                            appConfig = updatedDb.appConfig.copy(dbVersion = newVersion)
+                            appConfig = updatedDb.appConfig.copy(
+                                dbVersion = newVersion,
+                                latestApkVersion = autoApkVersion
+                            )
                         )
                         database.value = finalizedDb
                         store.saveDatabase(finalizedDb)
@@ -1572,6 +1669,26 @@ fun MainAppLayout(activity: ComponentActivity) {
                     onDismiss = { showSupportHelpDialog.value = false },
                     appConfig = database.value.appConfig,
                     isRegisteringHelp = isRegisteringHelp.value
+                )
+            }
+            if (showAdBlockDialog.value) {
+                AdBlockWarningDialog(
+                    isChecking = isCheckingAdBlock.value,
+                    showCloseButton = database.value.appConfig.adBlockShowCloseButton,
+                    onDismiss = { showAdBlockDialog.value = false },
+                    onRecheck = {
+                        coroutineScope.launch {
+                            isCheckingAdBlock.value = true
+                            val isBlocked = isAdBlockActive(context)
+                            showAdBlockDialog.value = isBlocked
+                            isCheckingAdBlock.value = false
+                            if (!isBlocked) {
+                                android.widget.Toast.makeText(context, "Thank you! Connection verified.", android.widget.Toast.LENGTH_SHORT).show()
+                            } else {
+                                android.widget.Toast.makeText(context, "Ad blocker or Private DNS still active.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -2014,7 +2131,7 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         // System Wide In-app update banner indicator
-        val isUpdateAvailable = false
+        val isUpdateAvailable = database.appConfig.latestApkVersion > CURRENT_APP_VERSION && SharedPreferencesStore(context).getAppRole() != "ADMIN"
         if (isUpdateAvailable && !dismissUpdate.value) {
             item {
                 Surface(
@@ -3894,7 +4011,7 @@ fun AdminConsoleScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val isAuthed = remember { mutableStateOf(false) }
+    val isAuthed = remember { mutableStateOf(store.isAdminAuthValid()) }
     val authStep = remember { mutableStateOf("CAMERA") } // CAMERA, CREDENTIALS
     val isAnalyzingPhoto = remember { mutableStateOf(false) }
     val capturedBitmap = remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -4250,6 +4367,7 @@ fun AdminConsoleScreen(
                                 
                                 if (isMasterMatch || isDbMatch) {
                                     isAuthed.value = true
+                                    store.saveLastAdminAuthTime(System.currentTimeMillis())
                                     faceVerifyPassInput.value = ""
                                     faceVerifyError.value = ""
                                     Toast.makeText(context, "Administrative Access Unlocked!", Toast.LENGTH_SHORT).show()
@@ -4377,6 +4495,7 @@ fun AdminConsoleScreen(
                                 
                                 if (isMasterMatch || isDbMatch) {
                                     isAuthed.value = true
+                                    store.saveLastAdminAuthTime(System.currentTimeMillis())
                                     Toast.makeText(context, "Administrative Access Unlocked!", Toast.LENGTH_SHORT).show()
                                 } else {
                                     credError.value = "❌ Parameter Mismatch!\nMaster Default Credentials (admin@rguhsnursing.com / 9880123456 / 1234) or your custom set configurations did not match."
@@ -4560,6 +4679,11 @@ fun AdminConsoleScreen(
         val customBgColorHexInput = remember(database.appConfig) { mutableStateOf(database.appConfig.customBgColorHex) }
         val customGradientStartHexInput = remember(database.appConfig) { mutableStateOf(database.appConfig.customGradientStartHex) }
         val customGradientEndHexInput = remember(database.appConfig) { mutableStateOf(database.appConfig.customGradientEndHex) }
+        val adEnableInput = remember(database.appConfig) { mutableStateOf(database.appConfig.adEnable) }
+        val bannerAdUnitIdInput = remember(database.appConfig) { mutableStateOf(database.appConfig.bannerAdUnitId) }
+        val interstitialAdUnitIdInput = remember(database.appConfig) { mutableStateOf(database.appConfig.interstitialAdUnitId) }
+        val adBlockDetectionEnableInput = remember(database.appConfig) { mutableStateOf(database.appConfig.adBlockDetectionEnable) }
+        val adBlockShowCloseButtonInput = remember(database.appConfig) { mutableStateOf(database.appConfig.adBlockShowCloseButton) }
 
         // Course Rename State
         val selectedRenameSlot = remember { mutableStateOf("slot1") }
@@ -4620,13 +4744,14 @@ fun AdminConsoleScreen(
                         fileUrlInput.value = downloadUrl
                         Toast.makeText(context, "Document uploaded successfully!", Toast.LENGTH_SHORT).show()
                         if (fileLabelInput.value.isBlank()) {
-                            var pickedName = "Uploaded PDF Document"
+                            var pickedName = "Uploaded Document"
                             try {
                                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                                     val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                                     if (nameIndex != -1 && cursor.moveToFirst()) {
                                         val full = cursor.getString(nameIndex)
-                                        pickedName = if (full.endsWith(".pdf", ignoreCase = true)) full.dropLast(4) else full
+                                        val dotIndex = full.lastIndexOf('.')
+                                        pickedName = if (dotIndex != -1) full.substring(0, dotIndex) else full
                                     }
                                 }
                             } catch (e: Exception) {}
@@ -4693,6 +4818,16 @@ fun AdminConsoleScreen(
                             letterSpacing = 0.5.sp,
                             fontFamily = FontFamily.Monospace
                         )
+                    }
+                    IconButton(
+                        onClick = {
+                            store.saveLastAdminAuthTime(0L) // Invalidate cache immediately
+                            isAuthed.value = false // Trigger lock screen
+                            Toast.makeText(context, "Locking Panel Access...", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Lock, contentDescription = "Lock Admin Panel", tint = Color.White)
                     }
                 }
             }
@@ -4994,6 +5129,161 @@ fun AdminConsoleScreen(
                                     )
                                 }
                             }
+
+                            // ==========================================================
+                            // ADMOB ADS & MONETIZATION PANEL
+                            // ==========================================================
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MonitorHeart,
+                                            contentDescription = "Monetization Icon",
+                                            tint = Colors.customOrange,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "ADMOB ADS & MONETIZATION PANEL",
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontFamily = FontFamily.Monospace,
+                                            letterSpacing = 1.sp
+                                        )
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { adEnableInput.value = !adEnableInput.value }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Enable AdMob Ads", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            Text("Toggle Banner and Interstitial Ads", fontSize = 9.sp, color = Color.LightGray)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(width = 46.dp, height = 24.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (adEnableInput.value) Color(0xFF059669) else Color(0xFF475569))
+                                                .padding(2.dp),
+                                            contentAlignment = if (adEnableInput.value) Alignment.CenterEnd else Alignment.CenterStart
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { adBlockDetectionEnableInput.value = !adBlockDetectionEnableInput.value }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Detect Private DNS & AdGuard", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            Text("Prevent App use if ad-blocker or ad DNS is active", fontSize = 9.sp, color = Color.LightGray)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(width = 46.dp, height = 24.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (adBlockDetectionEnableInput.value) Color(0xFF0284C7) else Color(0xFF475569))
+                                                .padding(2.dp),
+                                            contentAlignment = if (adBlockDetectionEnableInput.value) Alignment.CenterEnd else Alignment.CenterStart
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { adBlockShowCloseButtonInput.value = !adBlockShowCloseButtonInput.value }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column {
+                                            Text("Show 'Close/Bypass' Button", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            Text("Allow student to close warning without disabling AdGuard", fontSize = 9.sp, color = Color.LightGray)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(width = 46.dp, height = 24.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(if (adBlockShowCloseButtonInput.value) Color(0xFF0ea5e9) else Color(0xFF475569))
+                                                .padding(2.dp),
+                                            contentAlignment = if (adBlockShowCloseButtonInput.value) Alignment.CenterEnd else Alignment.CenterStart
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.White)
+                                            )
+                                        }
+                                    }
+
+                                    OutlinedTextField(
+                                        value = bannerAdUnitIdInput.value,
+                                        onValueChange = { bannerAdUnitIdInput.value = it },
+                                        label = { Text("ADMOB BANNER UNIT ID", fontSize = 10.sp) },
+                                        placeholder = { Text("ca-app-pub-3940256099942544/6300978111") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    OutlinedTextField(
+                                        value = interstitialAdUnitIdInput.value,
+                                        onValueChange = { interstitialAdUnitIdInput.value = it },
+                                        label = { Text("ADMOB INTERSTITIAL UNIT ID", fontSize = 10.sp) },
+                                        placeholder = { Text("ca-app-pub-3940256099942544/1033173712") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xFFFEF3C7).copy(alpha = 0.1f))
+                                            .padding(10.dp)
+                                    ) {
+                                        Column {
+                                            Text("💡 HOW TO EARN BY ADS:", fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Colors.customGold)
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text("1. Create BANNER and INTERSTITIAL ad units in your Google AdMob Dashboard.", fontSize = 9.sp, color = Color.White.copy(alpha = 0.8f))
+                                            Text("2. Copy-paste those unit IDs above.", fontSize = 9.sp, color = Color.White.copy(alpha = 0.8f))
+                                            Text("3. Press \"SAVE SYSTEM CONFIGURATION\" below to immediately sync and make these unit IDs active on all students' phones without updating the code!", fontSize = 9.sp, color = Color.White.copy(alpha = 0.8f))
+                                        }
+                                    }
+                                }
+                            }
+
                             // ==========================================================
                             // APPLICATION LOGO & BRANDING PANEL
                             // ==========================================
@@ -5772,7 +6062,12 @@ fun AdminConsoleScreen(
                                         customBorderColorHex = customBorderColorHexInput.value.trim(),
                                         customBgColorHex = customBgColorHexInput.value.trim(),
                                         customGradientStartHex = customGradientStartHexInput.value.trim(),
-                                        customGradientEndHex = customGradientEndHexInput.value.trim()
+                                        customGradientEndHex = customGradientEndHexInput.value.trim(),
+                                        adEnable = adEnableInput.value,
+                                        bannerAdUnitId = bannerAdUnitIdInput.value.trim(),
+                                        interstitialAdUnitId = interstitialAdUnitIdInput.value.trim(),
+                                        adBlockDetectionEnable = adBlockDetectionEnableInput.value,
+                                        adBlockShowCloseButton = adBlockShowCloseButtonInput.value
                                     )
                                     onDbUpdate(database.copy(appConfig = updatedConfig))
                                     ledgerLogs.add("Config parameters optimized successfully")
@@ -5795,11 +6090,7 @@ fun AdminConsoleScreen(
                                         context = context,
                                         onSuccess = { downloadUrl ->
                                             isUploadingApkAdmin.value = false
-                                            val nextVersion = if (database.appConfig.latestApkVersion < CURRENT_APP_VERSION) {
-                                                CURRENT_APP_VERSION + 1
-                                            } else {
-                                                database.appConfig.latestApkVersion + 1
-                                            }
+                                            val nextVersion = CURRENT_APP_VERSION
                                             val updatedConfig = database.appConfig.copy(
                                                 apkDownloadUrl = downloadUrl,
                                                 latestApkVersion = nextVersion,
@@ -5831,7 +6122,7 @@ fun AdminConsoleScreen(
                                 } else {
                                     Icon(imageVector = Icons.Default.CloudUpload, contentDescription = "Publish", tint = Color.White, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("PUBLISH LATEST APP UPDATE FOR STUDENTS (v${database.appConfig.latestApkVersion + 1})", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White)
+                                    Text("PUBLISH LATEST APP UPDATE FOR STUDENTS (v$CURRENT_APP_VERSION)", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.White)
                                 }
                             }                      }
                         
@@ -6429,7 +6720,7 @@ fun AdminConsoleScreen(
 
                             // Physical Document Upload Component
                             Text(
-                                text = "UPLOAD PHYSICAL DOCUMENT",
+                                text = "UPLOAD PHYSICAL DOCUMENT / MEDIA",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFFF8C00),
@@ -6444,57 +6735,145 @@ fun AdminConsoleScreen(
                             ) {
                                 Column(
                                     modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.CloudUpload,
-                                                contentDescription = "Upload Document",
-                                                tint = Color(0xFFFF8C00),
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Column {
-                                                Text(
-                                                    text = "Direct Multi-Tier PDF Upload",
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.sp,
-                                                    color = Color.Black
-                                                )
-                                                Text(
-                                                    text = "Highly secure cloud-based streaming storage",
-                                                    fontSize = 10.sp,
-                                                    color = Color.Gray
-                                                )
-                                            }
-                                        }
-                                        Button(
-                                            onClick = { documentPickerLauncher.launch("application/pdf") },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8C00)),
-                                            enabled = !isFileUploading.value,
-                                            contentPadding = PaddingValues(horizontal = 12.dp),
-                                            modifier = Modifier.height(36.dp)
-                                        ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CloudUpload,
+                                            contentDescription = "Upload Document",
+                                            tint = Color(0xFFFF8C00),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Column {
                                             Text(
-                                                text = if (isFileUploading.value) "UPLOADING..." else "SELECT PDF",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
+                                                text = "Dynamic Multi-Format Cloud Uploader",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = Color.Black
+                                            )
+                                            Text(
+                                                text = "Select any format below to stream directly to cloud storage:",
+                                                fontSize = 10.sp,
+                                                color = Color.Gray
                                             )
                                         }
                                     }
+
+                                    Divider(color = Color(0xFFFF8C00).copy(alpha = 0.1f))
+
+                                    // Grid of 4 Upload Buttons for PDF, DOCX, Image, and Other generic files
+                                    Column(
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // PDF Selection Button (Red Accent)
+                                            Button(
+                                                onClick = { documentPickerLauncher.launch("application/pdf") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                                enabled = !isFileUploading.value,
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.weight(1f).height(38.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PictureAsPdf,
+                                                    contentDescription = "PDF Icon",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+
+                                            // Word / DOCX Selection Button (Blue Accent)
+                                            Button(
+                                                onClick = { documentPickerLauncher.launch("application/vnd.openxmlformats-officedocument.wordprocessingml.document") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                                enabled = !isFileUploading.value,
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.weight(1f).height(38.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Description,
+                                                    contentDescription = "Docx Icon",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("DOCX", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Image / Camera selection (Green Accent)
+                                            Button(
+                                                onClick = { documentPickerLauncher.launch("image/*") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                                enabled = !isFileUploading.value,
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.weight(1f).height(38.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Image,
+                                                    contentDescription = "Image Icon",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("IMAGE / JPG", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+
+                                            // Any standard generic stream formatting
+                                            Button(
+                                                onClick = { documentPickerLauncher.launch("*/*") },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4B5563)),
+                                                enabled = !isFileUploading.value,
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.weight(1f).height(38.dp),
+                                                contentPadding = PaddingValues(horizontal = 4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CloudUpload,
+                                                    contentDescription = "Any File Icon",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("ANY FILE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                            }
+                                        }
+                                    }
+
                                     if (isFileUploading.value) {
-                                        LinearProgressIndicator(
-                                            modifier = Modifier.fillMaxWidth().height(4.dp),
-                                            color = Color(0xFFFF8C00),
-                                            trackColor = Color(0xFFFEE2E2)
-                                        )
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            LinearProgressIndicator(
+                                                modifier = Modifier.fillMaxWidth().height(4.dp),
+                                                color = Color(0xFFFF8C00),
+                                                trackColor = Color(0xFFFEE2E2)
+                                            )
+                                            Text(
+                                                text = "Streaming file chunks secure upload in progress, please wait...",
+                                                fontSize = 9.sp,
+                                                color = Color(0xFFFF8C00),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -7444,15 +7823,19 @@ fun ShareAppDialog(
     val finalApkUrl = if (apkUrl.isBlank()) "https://rguhsnursing.com" else apkUrl
 
     val isUploadingApk = remember { mutableStateOf(false) }
+    val role = remember { SharedPreferencesStore(context).getAppRole() }
 
     LaunchedEffect(finalApkUrl) {
-        if (apkUrl.isBlank() || apkUrl == "https://rguhsnursing.com" || apkUrl.contains("tmpfiles.org")) {
+        if (role == "ADMIN" && (apkUrl.isBlank() || apkUrl == "https://rguhsnursing.com" || apkUrl.contains("tmpfiles.org") || CURRENT_APP_VERSION > database.appConfig.latestApkVersion)) {
             isUploadingApk.value = true
             uploadApkToCloud(
                 context = context,
                 onSuccess = { downloadUrl ->
                     isUploadingApk.value = false
-                    val updatedConfig = database.appConfig.copy(apkDownloadUrl = downloadUrl)
+                    val updatedConfig = database.appConfig.copy(
+                        apkDownloadUrl = downloadUrl,
+                        latestApkVersion = CURRENT_APP_VERSION
+                    )
                     onDbUpdate(database.copy(appConfig = updatedConfig))
                 },
                 onError = { error ->
@@ -7520,14 +7903,14 @@ Spread the word and help your nursing friends study smart! 🚀
                 )
 
                 Text(
-                    text = "Share this premium study app with your friends and help everyone study together offline with zero hassle!",
+                    text = "Share this premium study companion! Your friends can install the offline Android APK directly onto their mobile devices.",
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     lineHeight = 16.sp
                 )
 
-                // Section: Direct Premium APK Download Link
+                // Option 1: Direct Premium APK Download Link Card
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -7542,7 +7925,7 @@ Spread the word and help your nursing friends study smart! 🚀
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "📥 ADVANCED ONE-CLICK INSTALLER LINK",
+                            text = "📥 PREMIUM OFFLINE APK INSTALLER LINK",
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
                             color = Color(0xFF10B981)
@@ -7555,16 +7938,18 @@ Spread the word and help your nursing friends study smart! 🚀
                                 .size(14.dp)
                                 .clickable {
                                     clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(finalApkUrl))
-                                    Toast.makeText(context, "Copied active download URL!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Copied APK Download URL!", Toast.LENGTH_SHORT).show()
                                 }
                         )
                     }
 
-                    val (infoLabel, infoColor, infoWeight) = remember(finalApkUrl, isUploadingApk.value) {
+                    val (infoLabel, infoColor, infoWeight) = remember(finalApkUrl, isUploadingApk.value, role) {
                         if (isUploadingApk.value) {
-                            Triple("⚡ SECURING ACCESS LINK: Preparing direct link...", Color(0xFFFF9800), FontWeight.Bold)
+                            Triple("⚡ RE-PUBLISHING APP: Syncing active build to cloud...", Color(0xFFFF9800), FontWeight.Bold)
+                        } else if (role == "ADMIN") {
+                            Triple("✅ SECURE RE-PUBLISHED APK: Click re-publish to push updates!", Color(0xFF10B981), FontWeight.Bold)
                         } else {
-                            Triple("✅ SECURE DIRECT LINK: Active and ready to share!", Color(0xFF10B981), FontWeight.Bold)
+                            Triple("✅ SECURE RE-PUBLISHED APK: Active and ready to share!", Color(0xFF10B981), FontWeight.Bold)
                         }
                     }
                     Text(
@@ -7582,6 +7967,48 @@ Spread the word and help your nursing friends study smart! 🚀
                         maxLines = 1,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    if (role == "ADMIN") {
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Re-Upload/Update button to let the main administrator push live updates to the APK link!
+                        Button(
+                            onClick = {
+                                if (!isUploadingApk.value) {
+                                    isUploadingApk.value = true
+                                    uploadApkToCloud(
+                                        context = context,
+                                        onSuccess = { downloadUrl ->
+                                            isUploadingApk.value = false
+                                            val updatedConfig = database.appConfig.copy(apkDownloadUrl = downloadUrl)
+                                            onDbUpdate(database.copy(appConfig = updatedConfig))
+                                            Toast.makeText(context, "Successfully updated sharing link with current modified APK build!", Toast.LENGTH_LONG).show()
+                                        },
+                                        onError = { error ->
+                                            isUploadingApk.value = false
+                                            Toast.makeText(context, "Compile/Publish upload failed: $error", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isUploadingApk.value) Color.Gray else Color(0xFF10B981)
+                            ),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            if (isUploadingApk.value) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("PUBLISHING NEW APK BUILD...", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            } else {
+                                Icon(imageVector = Icons.Default.Publish, contentDescription = "Publish Icon", tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("⚡ RE-PUBLISH CURRENT UPDATE TO APK LINK", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
                 }
 
                 // Unified Action Buttons
@@ -8428,6 +8855,217 @@ fun SupportHelpDialog(
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Close", fontSize = 11.sp, color = Color.White)
+            }
+        }
+    )
+}
+
+@Composable
+fun AdMobBannerView(adUnitId: String, modifier: Modifier = Modifier) {
+    if (adUnitId.isBlank()) return
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.05f)),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            modifier = Modifier.fillMaxWidth(),
+            factory = { context ->
+                com.google.android.gms.ads.AdView(context).apply {
+                    setAdSize(com.google.android.gms.ads.AdSize.BANNER)
+                    setAdUnitId(adUnitId.trim())
+                    val adRequest = com.google.android.gms.ads.AdRequest.Builder().build()
+                    loadAd(adRequest)
+                }
+            }
+        )
+    }
+}
+
+fun triggerInterstitialAdFlow(context: android.content.Context, adUnitId: String, adEnable: Boolean) {
+    if (!adEnable || adUnitId.isBlank()) return
+    try {
+        val adRequest = com.google.android.gms.ads.AdRequest.Builder().build()
+        com.google.android.gms.ads.interstitial.InterstitialAd.load(
+            context,
+            adUnitId.trim(),
+            adRequest,
+            object : com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback() {
+                override fun onAdLoaded(interstitialAd: com.google.android.gms.ads.interstitial.InterstitialAd) {
+                    val activity = context as? android.app.Activity
+                    if (activity != null && !activity.isFinishing && !activity.isDestroyed) {
+                        interstitialAd.show(activity)
+                    }
+                }
+                override fun onAdFailedToLoad(loadAdError: com.google.android.gms.ads.LoadAdError) {
+                    // Fail gracefully
+                }
+            }
+        )
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+suspend fun isAdBlockActive(context: android.content.Context): Boolean {
+    return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val activeNetwork = connectivityManager?.activeNetwork
+        val networkCapabilities = connectivityManager?.getNetworkCapabilities(activeNetwork)
+        val hasInternet = networkCapabilities?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        
+        if (!hasInternet) {
+            return@withContext false
+        }
+
+        try {
+            val neutralAddress = java.net.InetAddress.getByName("www.google.com")
+            if (neutralAddress.hostAddress.isNullOrBlank()) {
+                return@withContext false
+            }
+            
+            var isBlocked = false
+            val adHosts = listOf("pagead2.googlesyndication.com", "googleads.g.doubleclick.net")
+            for (host in adHosts) {
+                try {
+                    val adAddress = java.net.InetAddress.getByName(host)
+                    val ip = adAddress.hostAddress
+                    if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip.isNullOrBlank()) {
+                        isBlocked = true
+                        break
+                    }
+                } catch (e: Exception) {
+                    isBlocked = true
+                    break
+                }
+            }
+            isBlocked
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
+
+@Composable
+fun AdBlockWarningDialog(
+    isChecking: Boolean,
+    showCloseButton: Boolean,
+    onRecheck: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {
+            if (showCloseButton) {
+                onDismiss()
+            }
+        },
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Ad Blocker Warning",
+                tint = Color(0xFFEF4444),
+                modifier = Modifier.size(36.dp)
+            )
+        },
+        title = {
+            Text(
+                text = "Ad-Blocker / Private DNS Detected",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "We detected that you are using an ad-blocker or Private DNS (such as AdGuard).",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.9f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "To help us keep this study hub free, please disable AdGuard or set your Private DNS mode to Automatic/Off.",
+                    fontSize = 12.sp,
+                    color = Color.LightGray,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "🔧 HOW TO DISABLE:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Colors.customOrange
+                        )
+                        Text(
+                            text = "• Private DNS: Go to Settings > Network & internet > Private DNS and set it to \"Off\" or \"Automatic\".",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                        Text(
+                            text = "• AdGuard Filter / Host: Pause or disable active ad blocking / VPN profiles.",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+            }
+        },
+        containerColor = Color(0xFF1E293B),
+        tonalElevation = 6.dp,
+        shape = RoundedCornerShape(16.dp),
+        dismissButton = if (showCloseButton) {
+            {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                ) {
+                    Text("Close / Bypass Warning", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        } else null,
+        confirmButton = {
+            Button(
+                onClick = onRecheck,
+                enabled = !isChecking,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF044AA6),
+                    disabledContainerColor = Color(0xFF044AA6).copy(alpha = 0.5f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+            ) {
+                if (isChecking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Rechecking...", fontSize = 12.sp, color = Color.White)
+                } else {
+                    Text("I have disabled it (Recheck)", fontSize = 12.sp, color = Color.White)
+                }
             }
         }
     )
