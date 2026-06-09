@@ -7,3 +7,15 @@ plugins {
   alias(libs.plugins.secrets) apply false
 }
 
+tasks.register<Exec>("uploadApk") {
+  group = "publishing"
+  description = "Compiles the app and uploads the resulting APK"
+  commandLine("node", "upload_apk.js")
+}
+
+tasks.register<Exec>("updateNpoint") {
+  group = "publishing"
+  description = "Updates the database JSON on npoint"
+  commandLine("node", "update_npoint.js")
+}
+

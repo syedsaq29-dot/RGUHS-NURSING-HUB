@@ -64,6 +64,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInput
 import retrofit2.Retrofit
 import retrofit2.Response
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -4947,23 +4952,29 @@ fun AdminConsoleScreen(
         // Add Year Folder State
         val folderCourseInput = remember { mutableStateOf("bsc") }
         val folderSubList = database.subjects.filter { it.course.lowercase() == folderCourseInput.value.lowercase() }
-        val folderSubjectInput = remember(folderCourseInput.value, folderSubList) {
-            mutableStateOf(folderSubList.firstOrNull()?.subject ?: "")
+        val folderSubjectInput = remember(folderCourseInput.value) {
+            val subs = database.subjects.filter { it.course.lowercase() == folderCourseInput.value.lowercase() }
+            mutableStateOf(subs.firstOrNull()?.subject ?: "")
         }
         val folderYearInput = remember { mutableStateOf("") }
 
         // File Attachment State
         val attachCourseInput = remember { mutableStateOf("bsc") }
         val attachSubList = database.subjects.filter { it.course.lowercase() == attachCourseInput.value.lowercase() }
-        val attachSubjectInput = remember(attachCourseInput.value, attachSubList) {
-            mutableStateOf(attachSubList.firstOrNull()?.subject ?: "")
+        val attachSubjectInput = remember(attachCourseInput.value) {
+            val subs = database.subjects.filter { it.course.lowercase() == attachCourseInput.value.lowercase() }
+            mutableStateOf(subs.firstOrNull()?.subject ?: "")
         }
         val attachFolderList = database.year_folders.filter {
             it.course.lowercase() == attachCourseInput.value.lowercase() &&
             it.subject.lowercase() == attachSubjectInput.value.lowercase()
         }
-        val attachYearInput = remember(attachSubjectInput.value, attachFolderList) {
-            mutableStateOf(attachFolderList.firstOrNull()?.year ?: 2024)
+        val attachYearInput = remember(attachCourseInput.value, attachSubjectInput.value) {
+            val folders = database.year_folders.filter {
+                it.course.lowercase() == attachCourseInput.value.lowercase() &&
+                it.subject.lowercase() == attachSubjectInput.value.lowercase()
+            }
+            mutableStateOf(folders.firstOrNull()?.year ?: 2024)
         }
         val fileLabelInput = remember { mutableStateOf("") }
         val fileUrlInput = remember { mutableStateOf("") }
@@ -5006,8 +5017,9 @@ fun AdminConsoleScreen(
         // Remove Subject State
         val deleteCourseInput = remember { mutableStateOf("bsc") }
         val deleteSubList = database.subjects.filter { it.course.lowercase() == deleteCourseInput.value.lowercase() }
-        val deleteSubjectInput = remember(deleteCourseInput.value, deleteSubList) {
-            mutableStateOf(deleteSubList.firstOrNull()?.subject ?: "")
+        val deleteSubjectInput = remember(deleteCourseInput.value) {
+            val subs = database.subjects.filter { it.course.lowercase() == deleteCourseInput.value.lowercase() }
+            mutableStateOf(subs.firstOrNull()?.subject ?: "")
         }
 
         // Active Administrative Tab selector
@@ -7859,44 +7871,98 @@ fun PdfViewerScreen(
                 .weight(1f),
             contentAlignment = Alignment.Center
         ) {
-            // Load PDF through Google Docs Embedded Preview securely within Android WebView
-            val encodedPdfUrl = remember(pdfUrl) { URLEncoder.encode(pdfUrl, "UTF-8") }
-            val formattedEmbedViewerUrl = remember(encodedPdfUrl) { 
-                "https://docs.google.com/gview?embedded=true&url=$encodedPdfUrl" 
+            val isImageUrl = remember(pdfUrl) {
+                val lower = pdfUrl.lowercase().trim()
+                lower.endsWith(".jpg") || lower.endsWith(".jpeg") || 
+                lower.endsWith(".png") || lower.endsWith(".webp") || 
+                lower.endsWith(".gif") || lower.endsWith(".bmp") ||
+                lower.contains("image")
             }
 
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isWebPageLoading = false
+            if (isImageUrl) {
+                var scale by remember { mutableStateOf(1f) }
+                var offset by remember { mutableStateOf(Offset.Zero) }
+                val state = rememberTransformableState { zoomChange, offsetChange, _ ->
+                    scale = (scale * zoomChange).coerceIn(1f, 5f)
+                    offset += offsetChange
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clipToBounds()
+                        .transformable(state = state)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    if (scale > 1f) {
+                                        scale = 1f
+                                        offset = Offset.Zero
+                                    } else {
+                                        scale = 2.5f
+                                    }
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = pdfUrl,
+                        contentDescription = pdfTitle,
+                        onLoading = { isWebPageLoading = true },
+                        onSuccess = { isWebPageLoading = false },
+                        onError = { isWebPageLoading = false },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offset.x,
+                                translationY = offset.y
+                            ),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            } else {
+                // Load PDF through Google Docs Embedded Preview securely within Android WebView
+                val encodedPdfUrl = remember(pdfUrl) { URLEncoder.encode(pdfUrl, "UTF-8") }
+                val formattedEmbedViewerUrl = remember(encodedPdfUrl) { 
+                    "https://docs.google.com/gview?embedded=true&url=$encodedPdfUrl" 
+                }
+
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    isWebPageLoading = false
+                                }
+                            }
+                            webChromeClient = WebChromeClient()
+                            setDownloadListener { _, _, _, _, _ ->
+                                Toast.makeText(ctx, "Offline downloads are disabled for document protection.", Toast.LENGTH_LONG).show()
+                            }
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                allowFileAccess = true
+                            }
+                            setOnKeyListener { _, keyCode, event ->
+                                if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
+                                    onBack()
+                                    true
+                                } else {
+                                    false
+                                }
                             }
                         }
-                        webChromeClient = WebChromeClient()
-                        setDownloadListener { _, _, _, _, _ ->
-                            Toast.makeText(ctx, "Offline downloads are disabled for document protection.", Toast.LENGTH_LONG).show()
-                        }
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            allowFileAccess = true
-                        }
-                        setOnKeyListener { _, keyCode, event ->
-                            if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.action == android.view.KeyEvent.ACTION_UP) {
-                                onBack()
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
-                },
-                update = { webView ->
-                    webView.loadUrl(formattedEmbedViewerUrl)
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { webView ->
+                        webView.loadUrl(formattedEmbedViewerUrl)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             if (isWebPageLoading) {
                 Column(
@@ -7905,7 +7971,7 @@ fun PdfViewerScreen(
                 ) {
                     CircularProgressIndicator(color = Color(0xFF044AA6))
                     Text(
-                        text = "Loading Secure PDF Stream...",
+                        text = if (isImageUrl) "Loading Image Document..." else "Loading Secure PDF Stream...",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.Gray
