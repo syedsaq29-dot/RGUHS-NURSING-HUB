@@ -2,8 +2,8 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
-const srcPath = path.join(__dirname, 'app/build/outputs/apk/debug/app-debug.apk');
-const destPath = path.join(__dirname, 'app-debug.apk');
+const srcPath = path.join(__dirname, 'app/build/outputs/apk/release/app-release.apk');
+const destPath = path.join(__dirname, 'app-release.apk');
 
 // Ensure the compiled file is copied to root of project
 try {
@@ -64,15 +64,13 @@ console.log('Uploading active binary bundle...');
 uploadFile('https://litterbox.catbox.moe/resources/internals/api.php', 'fileToUpload', destPath, 'application/vnd.android.package-archive', { reqtype: 'fileupload', time: '72h' })
     .then((res) => {
         const link = res.body.trim();
-        if (link.startsWith('http')) {
-            console.log('TMPFILES_DOWNLOAD_LINK: ' + link);
-        } else {
-            console.log('Litterbox check: ' + link);
-        }
+        console.log('Litterbox response status:', res.statusCode, 'body:', link);
+        fs.writeFileSync(path.join(__dirname, 'uploaded_link.txt'), "Status: " + res.statusCode + "\nBody: " + link);
     })
     .catch(err => console.log('Litterbox error: ' + err.message));
 
-// Catbox upload
+// Catbox upload (disabled in compiler env)
+/*
 uploadFile('https://catbox.moe/user/api.php', 'fileToUpload', destPath, 'application/vnd.android.package-archive', { reqtype: 'fileupload' })
     .then((res) => {
         const link = res.body.trim();
@@ -83,3 +81,4 @@ uploadFile('https://catbox.moe/user/api.php', 'fileToUpload', destPath, 'applica
         }
     })
     .catch(err => console.log('Catbox error: ' + err.message));
+*/

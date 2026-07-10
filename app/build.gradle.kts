@@ -1,3 +1,11 @@
+import java.net.URL
+import java.net.HttpURLConnection
+import java.io.PrintWriter
+import java.io.OutputStreamWriter
+import java.io.FileInputStream
+import java.io.BufferedReader
+import java.io.InputStreamReader
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -12,10 +20,10 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.rguhsnursing.zpjwyq"
-    minSdk = 24
+    minSdk = 23
     targetSdk = 36
-    versionCode = 4
-    versionName = "1.3"
+    versionCode = 83
+    versionName = "1.0.23"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -27,23 +35,32 @@ android {
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
+      enableV1Signing = true
+      enableV2Signing = true
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
+      enableV1Signing = true
+      enableV2Signing = true
     }
   }
 
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.getByName("debugConfig")
     }
     debug {
+      isDebuggable = false
+      isMinifyEnabled = true
+      isShrinkResources = true
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("debugConfig")
     }
   }
@@ -56,6 +73,10 @@ android {
     buildConfig = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
+  lint {
+    checkReleaseBuilds = false
+    abortOnError = false
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -93,10 +114,12 @@ dependencies {
   implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
-  implementation(libs.play.services.ads)
+  // implementation(libs.play.services.ads)
+  implementation("com.applovin:applovin-sdk:13.0.1")
+  implementation(libs.unity.ads)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
+  // implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
@@ -120,3 +143,70 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.register("uploadApk") {
+    doLast {
+        val apkFile = file("build/outputs/apk/debug/app-debug.apk")
+        if (!apkFile.exists()) {
+            throw GradleException("APK does not exist! Run assembleDebug first.")
+        }
+        println("Uploading APK key files to catbox.moe: " + apkFile.absolutePath)
+        try {
+            val boundary = "====" + System.currentTimeMillis() + "===="
+            val url = URL("https://catbox.moe/user/api.php")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.doOutput = true
+            conn.doInput = true
+            conn.useCaches = false
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Connection", "Keep-Alive")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+
+            val outputStream = conn.outputStream
+            val writer = PrintWriter(OutputStreamWriter(outputStream, "UTF-8"), true)
+
+            // Parameter: reqtype = fileupload
+            writer.append("--$boundary").append("\r\n")
+            writer.append("Content-Disposition: form-data; name=\"reqtype\"").append("\r\n\r\n")
+            writer.append("fileupload").append("\r\n")
+            writer.flush()
+
+            // Parameter: fileToUpload = physical APK bytes
+            writer.append("--$boundary").append("\r\n")
+            writer.append("Content-Disposition: form-data; name=\"fileToUpload\"; filename=\"RGUHS_Nursing_App.apk\"").append("\r\n")
+            writer.append("Content-Type: application/vnd.android.package-archive").append("\r\n\r\n")
+            writer.flush()
+
+            val fileInputStream = FileInputStream(apkFile)
+            val buffer = ByteArray(8192)
+            var bytesRead: Int
+            while (fileInputStream.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+            }
+            outputStream.flush()
+            fileInputStream.close()
+
+            writer.append("\r\n")
+            writer.append("--$boundary--").append("\r\n")
+            writer.flush()
+            writer.close()
+
+            val responseCode = conn.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                val responseReader = BufferedReader(InputStreamReader(conn.inputStream))
+                val response = responseReader.use { it.readText() }.trim()
+                println("SUCCESS: Upload complete! Link is:")
+                println("APK_URL:" + response)
+            } else {
+                println("FAILED with HTTP response: " + responseCode)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            throw e
+        }
+    }
+}
+
+
+

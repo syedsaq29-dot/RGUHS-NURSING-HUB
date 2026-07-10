@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <!-- Gentle mascot crest for the Nurse/Medical portal setup -->
+    <!-- Light outer protective glow -->
+    <path
+        android:pathData="M100,20 C144,20 180,56 180,100 C180,144 144,180 100,180 C56,180 20,144 20,100 C20,56 56,20 100,20 Z"
+        android:fillColor="#151E40AF"/>
+    <!-- Main blue shield button badge -->
+    <path
+        android:pathData="M100,30 C138.6,30 170,61.4 170,100 C170,138.6 138.6,170 100,170 C61.4,170 30,138.6 30,100 C30,61.4 61.4,30 100,30 Z"
+        android:fillColor="#2563EB"/>
+    <!-- Pristine White Medical Cross symbol representing Nursing help center -->
+    <path
+        android:pathData="M100,65 L100,135 M65,100 L135,100"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="18"
+        android:strokeLineCap="round"/>
+    <!-- Deep sky blue accent in-line highlight -->
+    <path
+        android:pathData="M100,65 L100,135 M65,100 L135,100"
+        android:strokeColor="#60A5FA"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"/>
+</vector>

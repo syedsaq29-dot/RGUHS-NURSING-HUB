@@ -1,6 +1,6 @@
 {
-  "name": "RGUHS Nursing Hub",
-  "description": "Premium companion portal for RGUHS nursing syllabus, previous year exam papers, student unlock matrices, and bulletins.",
+  "name": "Nursing Hub",
+  "description": "Independent study hub for nursing papers, syllabus, & student notes. Unofficial.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

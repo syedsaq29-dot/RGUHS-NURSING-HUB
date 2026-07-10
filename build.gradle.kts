@@ -16,6 +16,6 @@ tasks.register<Exec>("uploadApk") {
 tasks.register<Exec>("updateNpoint") {
   group = "publishing"
   description = "Updates the database JSON on npoint"
-  commandLine("node", "update_npoint.js")
+  commandLine("node", "auto_update_npoint.js")
 }
 

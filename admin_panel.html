@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RGUHS Nursing Hub — Cloud Admin Portal</title>
+    <!-- Tailwind CSS Platform Dev -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Vector Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Alpine.js declarative high-reactivity framework -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0F172A;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1E293B;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3B82F6;
+        }
+    </style>
+</head>
+<body class="bg-[#0F172A] text-slate-100 font-sans min-h-screen selection:bg-blue-600 selection:text-white" x-data="adminDashboard()" x-init="initDashboard()">
+
+    <!-- CONNECTIVITY LOADING BLOCKER -->
+    <div x-show="loading" class="fixed inset-0 bg-[#0F172A]/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center space-y-4" x-cloak>
+        <div class="relative w-16 h-16">
+            <div class="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
+            <div class="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin"></div>
+        </div>
+        <p class="text-blue-400 font-mono tracking-wider text-sm font-semibold animate-pulse" x-text="loadingText"></p>
+    </div>
+
+    <!-- MAIN ROOT BLOCKER: LOGIN SCREEN -->
+    <div x-show="!isLoggedIn" class="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" x-cloak>
+        <!-- Atmospheric Ambient Glows -->
+        <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl animate-pulse"></div>
+        <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl animate-pulse" style="animation-delay: 2s"></div>
+
+        <div class="w-full max-w-md bg-[#1E293B]/80 backdrop-blur-md rounded-2xl border border-slate-700/60 shadow-2xl p-8 relative z-10">
+            <div class="flex flex-col items-center mb-8">
+                <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20 mb-4 border border-blue-400/20">
+                    <i class="fa-solid fa-graduation-cap text-3xl text-white"></i>
+                </div>
+                <h1 class="text-2xl font-black tracking-tight text-white">RGUHS NURSING HUB</h1>
+                <p class="text-slate-400 text-xs font-semibold mt-1 font-mono uppercase tracking-widest text-[#10B981]">Central Config Dashboard</p>
+            </div>
+
+            <!-- Login Error Toast -->
+            <div x-show="loginError" x-transition class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-xs flex items-center gap-2">
+                <i class="fa-solid fa-circle-exclamation text-sm"></i>
+                <span x-text="loginError"></span>
+            </div>
+
+            <form @submit.prevent="authenticateAdmin()" class="space-y-5">
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-2 font-mono">Server Bin Identifier</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-xs font-mono">ID:</span>
+                        <input type="text" x-model="binId" class="w-full pl-9 pr-4 py-3 bg-slate-900/60 border border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono" placeholder="a20ffed648ea679c5ce2" required>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-2 font-mono">Administrative Password</label>
+                    <input type="password" x-model="adminPassword" class="w-full px-4 py-3 bg-slate-900/60 border border-slate-750 border-slate-700 rounded-xl text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all" placeholder="••••••••" required>
+                </div>
+
+                <button type="submit" class="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-500/25 border border-blue-400/20 transition-all flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-cloud-arrow-down"></i>
+                    Synchronize & Unlock
+                </button>
+            </form>
+
+            <div class="mt-8 pt-6 border-t border-slate-800 text-center text-[10px] text-slate-500 font-mono">
+                CONNECTED TO CENTRAL NPOINT LEDGER VIA HTTP-REST
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGGED IN VIEWPORT -->
+    <div x-show="isLoggedIn" class="min-h-screen flex flex-col" x-cloak>
+        
+        <!-- HEADER LEVEL BRANDING -->
+        <header class="bg-[#1E293B]/80 backdrop-blur-md border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-30">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center border border-blue-400/20 shadow-md">
+                    <i class="fa-solid fa-graduation-cap text-lg text-white"></i>
+                </div>
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <h2 class="text-white hover:text-blue-400 transition-colors font-bold text-sm tracking-tight" x-text="db.appConfig.appName || 'RGUHS Nursing Hub'">RGUHS Nursing Hub</h2>
+                        <span class="px-2 py-0.5 bg-[#10B981]/15 text-[#10B981] font-mono font-bold text-[9px] rounded-full uppercase tracking-wider border border-[#10B981]/25">LIVE DEPLOYED v<span x-text="formatAppVersion(CURRENT_APP_VERSION)"></span></span>
+                    </div>
+                    <p class="text-xs text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                        <span class="inline-block w-2 bg-[#10B981] h-2 rounded-full animate-pulse"></span>
+                        npoint database ledger ID [ <span class="text-blue-400 font-bold" x-text="binId"></span> ]
+                    </p>
+                </div>
+            </div>
+
+            <!-- Global Action Triggers -->
+            <div class="flex items-center space-x-3">
+                <button @click="forceReSync()" class="px-3.5 py-2 bg-slate-850 bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 hover:border-slate-650 flex items-center gap-1.5 transition-all">
+                    <i class="fa-solid fa-rotate animate-spin" x-show="saving"></i>
+                    <i class="fa-solid fa-rotate" x-show="!saving"></i>
+                    Refresh Database
+                </button>
+                <template x-if="hasUnsavedChanges">
+                    <div class="px-2.5 py-1.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold uppercase rounded flex items-center gap-1 animate-pulse">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Unsaved Config
+                    </div>
+                </template>
+                <button @click="saveDatabaseToServer()" :class="hasUnsavedChanges ? 'bg-amber-600 hover:bg-amber-550 border-amber-500 shadow-amber-500/15 animate-pulse' : 'bg-blue-600 hover:bg-blue-550 border-blue-500 shadow-blue-500/15'" class="px-3.5 py-2 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg border border-t-white/10 flex items-center gap-1.5 transition-all">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                    Save DB to Cloud
+                </button>
+                <button @click="logout()" class="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors" title="Disconnect & Exit">
+                    <i class="fa-solid fa-power-off text-base"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- SHELL LAYOUT: SIDEBAR + INNER PANES -->
+        <div class="flex-1 flex overflow-hidden">
+            
+            <!-- LEFT NAVIGATION SIDEBAR -->
+            <aside class="w-64 bg-[#111827]/40 border-r border-slate-800 flex flex-col p-4 space-y-1.5 max-h-[calc(100vh-73px)] overflow-y-auto">
+                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase font-mono tracking-widest pt-2 pb-1.5">METRICS & SUMMARY</p>
+                <button @click="activeTab = 'telemetry'" :class="activeTab === 'telemetry' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-chart-line text-sm w-4"></i> Global Telemetry</span>
+                    <i class="fa-solid fa-angle-right text-[10px] opacity-50"></i>
+                </button>
+
+                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase font-mono tracking-widest pt-5 pb-1.5">MEMBER OPERATIONS</p>
+                <button @click="activeTab = 'students'" :class="activeTab === 'students' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-user-graduate text-sm w-4"></i> Student Accounts</span>
+                    <span class="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 font-mono text-[9px] rounded-md font-semibold" x-text="db.registered_students.length">0</span>
+                </button>
+                <button @click="activeTab = 'payments'" :class="activeTab === 'payments' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-receipt text-sm w-4"></i> Approved UTRs</span>
+                    <span class="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 font-mono text-[9px] rounded-md font-semibold" x-text="db.utrList.length">0</span>
+                </button>
+
+                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase font-mono tracking-widest pt-5 pb-1.5">DATA & RESOURCE UPLOAD</p>
+                <button @click="activeTab = 'resources'" :class="activeTab === 'resources' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-regular fa-file-pdf text-sm w-4"></i> PDF Archive Lists</span>
+                    <span class="px-1.5 py-0.5 bg-amber-500/10 text-amber-500 font-mono text-[9px] rounded-md font-semibold" x-text="db.resource_files.length">0</span>
+                </button>
+                <button @click="activeTab = 'subjects'" :class="activeTab === 'subjects' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-book-medical text-sm w-4"></i> Subjects Catalog</span>
+                    <span class="px-1.5 py-0.5 bg-violet-500/10 text-violet-400 font-mono text-[9px] rounded-md font-semibold" x-text="db.subjects.length">0</span>
+                </button>
+                <button @click="activeTab = 'years'" :class="activeTab === 'years' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-folder-open text-xs w-4"></i> Exam Folder Map</span>
+                    <span class="px-1.5 py-0.5 bg-pink-500/10 text-pink-500 font-mono text-[9px] rounded-md font-semibold" x-text="db.year_folders.length">0</span>
+                </button>
+
+                <p class="px-3 text-[10px] font-bold text-slate-500 uppercase font-mono tracking-widest pt-5 pb-1.5">GLOBAL DISPATCH</p>
+                <button @click="activeTab = 'announcements'" :class="activeTab === 'announcements' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-bullhorn text-sm w-4"></i> Announcements</span>
+                    <span class="px-1.5 py-0.5 bg-[#10B981]/10 text-[#10B981] font-mono text-[9px] rounded-md font-semibold" x-text="db.announcements.length">0</span>
+                </button>
+                <button @click="activeTab = 'configs'" :class="activeTab === 'configs' ? 'bg-blue-600/15 text-blue-400 font-bold border border-blue-500/30' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'" class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs transition-all text-left">
+                    <span class="flex items-center gap-2.5"><i class="fa-solid fa-sliders text-sm w-4"></i> Remote App Settings</span>
+                    <i class="fa-solid fa-gears text-[10px] opacity-70 text-blue-500"></i>
+                </button>
+
+                <div class="flex-1"></div>
+                <div class="p-3 bg-slate-900 border border-slate-800 rounded-lg text-[10px] text-slate-400 font-mono tracking-wide leading-relaxed mt-6">
+                    <div class="font-bold text-slate-300 flex items-center justify-between mb-1">
+                        <span>SYS MEM DATA</span>
+                        <span class="text-blue-500 w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
+                    </div>
+                    JSON payloads synced dynamically. Unsaved edits remain local. Click "Save DB to Cloud" to write server updates.
+                </div>
+            </aside>
+
+            <!-- CENTRAL DETAIL INSET WORKSPACE -->
+            <main class="flex-1 p-6 overflow-y-auto max-h-[calc(100vh-73px)]">
+
+                <!-- TAB 1: ADVANCED REALTIME TELEMETRY -->
+                <div x-show="activeTab === 'telemetry'" class="space-y-6" x-transition>
+                    <div class="p-6 bg-gradient-to-r from-blue-900/40 via-indigo-950/20 to-slate-900 border border-blue-550/20 border-slate-800 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl relative overflow-hidden">
+                        <div class="absolute right-0 top-0 translate-y-[-20%] translate-x-[20%] w-80 h-80 bg-blue-500/5 rounded-full blur-3xl"></div>
+                        <div class="space-y-2 relative z-10">
+                            <h3 class="text-xl font-extrabold text-white">Central Operations Console</h3>
+                            <p class="text-slate-300 text-xs">Real-time status, indices, database volume, and client update dispatcher controls.</p>
+                        </div>
+                        <div class="flex flex-wrap gap-4 items-center relative z-10 w-full md:w-auto">
+                            <div class="bg-slate-900/80 border border-slate-750 px-4 py-2.5 rounded-xl text-center">
+                                <span class="block text-[10px] text-slate-400 font-mono tracking-widest font-bold uppercase mb-0.5">DB VERSION CONTROL</span>
+                                <span class="text-lg font-black font-mono text-emerald-400" x-text="db.appConfig.dbVersion">0</span>
+                            </div>
+                            <div class="bg-slate-900/80 border border-slate-750 px-4 py-2.5 rounded-xl text-center">
+                                <span class="block text-[10px] text-slate-400 font-mono tracking-widest font-bold uppercase mb-0.5">CURRENT APK VERSION</span>
+                                <span class="text-lg font-black font-mono text-blue-400">v<span x-text="formatAppVersion(CURRENT_APP_VERSION)"></span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- REPLICATED TELEMETRY PANELS FROM MAINACTIVITY -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="p-5 bg-gradient-to-b from-[#1E293B] to-[#0F172A] border border-slate-800 rounded-xl relative overflow-hidden shadow-lg hover:border-slate-700 transition-colors">
+                            <div class="absolute right-4 top-4 text-3xl text-blue-500/20">
+                                <i class="fa-solid fa-users"></i>
+                            </div>
+                            <span class="block text-[9px] uppercase font-mono tracking-widest text-[#3B82F6] font-bold">Verified Members</span>
+                            <span class="block text-3xl font-black font-mono text-white mt-2" x-text="db.registered_students.length">0</span>
+                            <span class="block text-slate-400 text-[10px] mt-1 font-mono">Registered Students</span>
+                        </div>
+
+                        <div class="p-5 bg-gradient-to-b from-[#1E293B] to-[#0F172A] border border-slate-800 rounded-xl relative overflow-hidden shadow-lg hover:border-slate-700 transition-colors">
+                            <div class="absolute right-4 top-4 text-3xl text-amber-500/20">
+                                <i class="fa-regular fa-eye"></i>
+                            </div>
+                            <span class="block text-[9px] uppercase font-mono tracking-widest text-[#F59E0B] font-bold">Total Document Reads</span>
+                            <span class="block text-3xl font-black font-mono text-white mt-2" x-text="db.appConfig.totalPdfViews || 0">0</span>
+                            <span class="block text-slate-400 text-[10px] mt-1 font-mono">PDF Interactive Views</span>
+                        </div>
+
+                        <div class="p-5 bg-gradient-to-b from-[#1E293B] to-[#0F172A] border border-slate-800 rounded-xl relative overflow-hidden shadow-lg hover:border-slate-700 transition-colors">
+                            <div class="absolute right-4 top-4 text-3xl text-emerald-500/20">
+                                <i class="fa-solid fa-book-open"></i>
+                            </div>
+                            <span class="block text-[9px] uppercase font-mono tracking-widest text-[#10B981] font-bold">Subject Folders</span>
+                            <span class="block text-3xl font-black font-mono text-white mt-2" x-text="db.subjects.length">0</span>
+                            <span class="block text-slate-400 text-[10px] mt-1 font-mono">Configured Curriculum</span>
+                        </div>
+
+                        <div class="p-5 bg-gradient-to-b from-[#1E293B] to-[#0F172A] border border-slate-800 rounded-xl relative overflow-hidden shadow-lg hover:border-slate-700 transition-colors">
+                            <div class="absolute right-4 top-4 text-3xl text-violet-500/20">
+                                <i class="fa-solid fa-file-contract"></i>
+                            </div>
+                            <span class="block text-[9px] uppercase font-mono tracking-widest text-violet-400 font-bold">Indexed PDFs</span>
+                            <span class="block text-3xl font-black font-mono text-white mt-2" x-text="db.resource_files.length">0</span>
+                            <span class="block text-slate-400 text-[10px] mt-1 font-mono">Academic PDF URLs</span>
+                        </div>
+                    </div>
+
+                    <!-- RAPID UPDATE DISPATCHER (THE ONE CALLED "NOTIFY INDICES") -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        
+                        <!-- UPDATE BROADCASTER -->
+                        <div class="md:col-span-2 p-6 bg-slate-[#1E293B] bg-slate-900/60 border border-slate-800 rounded-2xl space-y-4">
+                            <h4 class="text-sm font-bold text-white tracking-wide uppercase flex items-center gap-2 text-blue-400">
+                                <i class="fa-solid fa-bullhorn text-[#10B981]"></i>
+                                Global Update Broadcaster & APK Deployer
+                            </h4>
+                            <p class="text-xs text-slate-350 text-slate-400 leading-relaxed font-mono">
+                                Directly trigger an update alert on every student's dashboard app dynamically! Bumping the official version higher than the current device build will instantly lock elements and prompt standard safe update downloads.
+                            </p>
+                            
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-1.5 font-mono">Broadcasted Target Version</label>
+                                    <input type="number" x-model.number="db.appConfig.latestApkVersion" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold tracking-widest uppercase mb-1.5 font-mono">Active Download URL (.apk)</label>
+                                    <input type="text" x-model="db.appConfig.apkDownloadUrl" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-300 font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-2 pt-4 flex-wrap">
+                                <button @click="incrementTargetVersion()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow-lg flex items-center gap-1.5 transition-all">
+                                    <i class="fa-solid fa-arrow-turn-up"></i>
+                                    Bump & Dispatch Alert (v<span x-text="formatAppVersion(db.appConfig.latestApkVersion + 1)"></span>)
+                                </button>
+                                <button @click="alignToCurrentBuild()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs rounded-lg shadow-md flex items-center gap-1.5 transition-all">
+                                    <i class="fa-solid fa-compress"></i>
+                                    Align to Current Build (v<span x-text="formatAppVersion(CURRENT_APP_VERSION)"></span>)
+                                </button>
+                                <span class="text-[11px] text-slate-400 font-mono" x-show="db.appConfig.latestApkVersion > CURRENT_APP_VERSION">
+                                    <i class="fa-solid fa-circle-check text-emerald-400"></i> Alert is actively Broadcasted!
+                                </span>
+                                <span class="text-[11px] text-slate-400 font-mono" x-show="db.appConfig.latestApkVersion <= CURRENT_APP_VERSION">
+                                    <i class="fa-solid fa-circle-info text-amber-400"></i> App is Up to Date (No active broadcast).
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- LOCAL QUICK LINKS & ACTIONS -->
+                        <div class="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl flex flex-col justify-between">
+                            <div class="space-y-4">
+                                <h4 class="text-sm font-bold text-white tracking-wide uppercase text-indigo-400 flex items-center gap-2">
+                                    <i class="fa-solid fa-network-wired"></i> Quick Actions
+                                </h4>
+                                <ul class="space-y-2.5">
+                                    <li>
+                                        <button @click="activeTab = 'students'" class="w-full text-left px-3 py-2 bg-slate-950/40 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs rounded-lg transition-all flex items-center justify-between">
+                                            <span>Manage Registered Students</span>
+                                            <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button @click="activeTab = 'resources'" class="w-full text-left px-3 py-2 bg-slate-950/40 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs rounded-lg transition-all flex items-center justify-between">
+                                            <span>Upload & Map PDF Catalogs</span>
+                                            <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button @click="activeTab = 'configs'" class="w-full text-left px-3 py-2 bg-slate-950/40 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs rounded-lg transition-all flex items-center justify-between">
+                                            <span>Change Pricing & Theme colors</span>
+                                            <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                            <div class="pt-6 border-t border-slate-800/60 mt-4 text-[11px] text-slate-400 flex items-center justify-between">
+                                <span class="font-mono">Server Status: online</span>
+                                <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: REGISTERED STUDENTS MANAGEMENT -->
+                <div x-show="activeTab === 'students'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Student Enrollment Catalog</h3>
+                            <p class="text-xs text-slate-400">View and update user credentials, unlock statuses, and student ID allocations.</p>
+                        </div>
+                        <button @click="showAddStudentModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-550 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-user-plus"></i> Add Student Account
+                        </button>
+                    </div>
+
+                    <!-- SEARCH BAR & FILTERING -->
+                    <div class="p-4 bg-slate-900 border border-slate-850 bg-slate-900/60 rounded-xl flex flex-col sm:flex-row gap-4">
+                        <div class="relative flex-1">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-magnifying-glass text-xs"></i></span>
+                            <input type="text" x-model="searchStudent" class="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:border-blue-500" placeholder="Search by name, contact ID, or assigned Student ID...">
+                        </div>
+                    </div>
+
+                    <!-- STUDENTS TABLE -->
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-300">
+                                <thead class="bg-slate-950 text-slate-400 font-mono text-[10px] tracking-widest uppercase border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-4 py-3">Student Name</th>
+                                        <th class="px-4 py-3">Registered Contact ID</th>
+                                        <th class="px-4 py-3">Assigned ID / Token</th>
+                                        <th class="px-4 py-3">Secure Password</th>
+                                        <th class="px-4 py-3">Created Date</th>
+                                        <th class="px-4 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60">
+                                    <template x-for="(student, index) in filteredStudents()" :key="index">
+                                        <tr class="hover:bg-slate-800/40 transition-colors">
+                                            <td class="px-4 py-3.5 font-bold text-white" x-text="student.name"></td>
+                                            <td class="px-4 py-3.5 font-mono text-blue-400" x-text="student.contactId"></td>
+                                            <td class="px-4 py-3.5 font-mono text-emerald-400 font-semibold" x-text="student.studentId"></td>
+                                            <td class="px-4 py-3.5 font-mono text-slate-400" x-text="student.password"></td>
+                                            <td class="px-4 py-3.5 text-slate-400 font-mono text-[10px]" x-text="student.registeredAt"></td>
+                                            <td class="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                                                <button @click="showEditStudentModal(student, index)" class="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition-all"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                                                <button @click="deleteStudent(index)" class="p-1 px-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded text-[11px] transition-all"><i class="fa-regular fa-trash-can"></i> Del</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="filteredStudents().length === 0">
+                                        <td colspan="6" class="px-4 py-8 text-center text-slate-500 font-mono text-xs">NO ENROLLED MEMBERS DETECTED</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: RESOURCE FILES & EXAM PAPERS -->
+                <div x-show="activeTab === 'resources'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Interactive PDF Archive Map</h3>
+                            <p class="text-xs text-slate-400">Map, link, and upload exam PDF catalogues distributed across years and semester catalogs.</p>
+                        </div>
+                        <button @click="showAddResourceModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-550 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-file-invoice"></i> Map New PDF File
+                        </button>
+                    </div>
+
+                    <!-- CENTRAL SEARCH / CATEGORY FILTERING -->
+                    <div class="p-4 bg-slate-900 border border-slate-850 bg-slate-900/60 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div class="relative md:col-span-1">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-filter text-xs"></i></span>
+                            <select x-model="filterCourse" class="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 text-xs focus:outline-none focus:border-blue-500">
+                                <option value="">All Courses</option>
+                                <option x-text="db.appConfig.courseSlot1 || 'B.Sc'"></option>
+                                <option x-text="db.appConfig.courseSlot2 || 'P.B.B.Sc'"></option>
+                                <option x-text="db.appConfig.courseSlot3 || 'M.Sc'"></option>
+                            </select>
+                        </div>
+                        <div class="relative md:col-span-2">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500"><i class="fa-solid fa-magnifying-glass text-xs"></i></span>
+                            <input type="text" x-model="searchResource" class="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:border-blue-500" placeholder="Search by paper title or subject tags...">
+                        </div>
+                    </div>
+
+                    <!-- PDF LISTS -->
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-300">
+                                <thead class="bg-slate-950 text-slate-400 font-mono text-[10px] tracking-widest uppercase border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-4 py-3">Degree Course</th>
+                                        <th class="px-4 py-3">Allocated Subject</th>
+                                        <th class="px-4 py-3">Target Year</th>
+                                        <th class="px-4 py-3">Document Title</th>
+                                        <th class="px-4 py-3">Target PDF URL Link</th>
+                                        <th class="px-4 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60">
+                                    <template x-for="(file, index) in filteredResources()" :key="index">
+                                        <tr class="hover:bg-slate-800/40 transition-colors">
+                                            <td class="px-4 py-3.5 flex flex-wrap gap-1 items-center">
+                                                <span class="px-2 py-0.5 bg-blue-600/10 text-blue-400 text-[10px] tracking-wide rounded border border-blue-500/20 font-bold" x-text="file.course"></span>
+                                                <template x-if="getSemesterText(file)">
+                                                    <span class="px-2 py-0.5 bg-purple-600/10 text-purple-400 text-[10px] tracking-wide rounded border border-purple-500/20 font-bold" x-text="getSemesterText(file)"></span>
+                                                </template>
+                                            </td>
+                                            <td class="px-4 py-3.5 text-slate-300 font-semibold" x-text="file.subject"></td>
+                                            <td class="px-4 py-3.5 font-mono text-emerald-400 font-bold" x-text="file.year"></td>
+                                            <td class="px-4 py-3.5 font-bold text-white flex items-center gap-1.5">
+                                                <i class="fa-regular fa-file-pdf text-red-400 text-sm"></i>
+                                                <span x-text="file.title"></span>
+                                            </td>
+                                            <td class="px-4 py-3.5 font-mono text-xs text-slate-450 hover:text-blue-400 transition-colors">
+                                                <a :href="file.url" target="_blank" class="flex items-center gap-1">
+                                                    <span class="max-w-[200px] inline-block truncate" x-text="file.url"></span>
+                                                    <i class="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
+                                                </a>
+                                            </td>
+                                            <td class="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                                                <button @click="showEditResourceModal(file, index)" class="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition-all"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                                                <button @click="deleteResource(index)" class="p-1 px-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded text-[11px] transition-all"><i class="fa-regular fa-trash-can"></i> Del</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="filteredResources().length === 0">
+                                        <td colspan="6" class="px-4 py-8 text-center text-slate-500 font-mono text-xs">NO MAPPED PDF FILE DETECTED</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: SUBJECTS CATALOGS -->
+                <div x-show="activeTab === 'subjects'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Primary Curriculum & Syllabus Database</h3>
+                            <p class="text-xs text-slate-400">Map and set core syllabus, semesters, and targets for courses.</p>
+                        </div>
+                        <button @click="showAddSubjectModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-550 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-plus"></i> Add New Subject
+                        </button>
+                    </div>
+
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-300">
+                                <thead class="bg-slate-950 text-slate-400 font-mono text-[10px] tracking-widest uppercase border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-4 py-3">Linked Course</th>
+                                        <th class="px-4 py-3">Subject Name</th>
+                                        <th class="px-4 py-3">Assigned Semester</th>
+                                        <th class="px-4 py-3">Active Syllabus PDF link</th>
+                                        <th class="px-4 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60 font-sans">
+                                    <template x-for="(sub, index) in db.subjects" :key="index">
+                                        <tr class="hover:bg-slate-800/40 transition-colors">
+                                            <td class="px-4 py-3.5"><span class="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 font-bold border border-indigo-500/10 rounded" x-text="sub.course text-[10px]"></span></td>
+                                            <td class="px-4 py-3.5 text-white font-bold" x-text="sub.subject"></td>
+                                            <td class="px-4 py-3.5 font-mono font-semibold" x-text="sub.semester !== null ? 'Semester ' + sub.semester : 'N/A'"></td>
+                                            <td class="px-4 py-3.5 font-mono text-slate-400">
+                                                <span x-show="!sub.syllabusUrl" class="text-slate-600 text-xs italic">No Syllabus Configured</span>
+                                                <a x-show="sub.syllabusUrl" :href="sub.syllabusUrl" target="_blank" class="text-blue-400 hover:underline flex items-center gap-1">
+                                                    <span class="max-w-[200px] inline-block truncate" x-text="sub.syllabusUrl"></span>
+                                                    <i class="fa-solid fa-up-right-from-square text-[9px]"></i>
+                                                </a>
+                                            </td>
+                                            <td class="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                                                <button @click="showEditSubjectModal(sub, index)" class="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition-all"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                                                <button @click="deleteSubject(index)" class="p-1 px-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded text-[11px] transition-all"><i class="fa-regular fa-trash-can"></i> Del</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="db.subjects.length === 0">
+                                        <td colspan="5" class="px-4 py-8 text-center text-slate-500 font-mono text-xs">NO DISCOVERABLE SUBJECT DIRECTORY REGISTERED</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 5: EXAM FOLDER REGISTRY -->
+                <div x-show="activeTab === 'years'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Year Folder Maps</h3>
+                            <p class="text-xs text-slate-400">Validate directories containing previous exams mapped under Courses and Subjects.</p>
+                        </div>
+                        <button @click="showAddYearModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-550 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-plus"></i> Map New Year Folder
+                        </button>
+                    </div>
+
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-300">
+                                <thead class="bg-slate-950 text-slate-400 font-mono text-[10px] tracking-widest uppercase border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-4 py-3">Course Link</th>
+                                        <th class="px-4 py-3">Linked Subject</th>
+                                        <th class="px-4 py-3">Exam Paper Year</th>
+                                        <th class="px-4 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60">
+                                    <template x-for="(y, index) in db.year_folders" :key="index">
+                                        <tr class="hover:bg-slate-800/40 transition-colors">
+                                            <td class="px-4 py-3.5"><span class="px-2 py-0.5 bg-blue-500/10 text-blue-400 font-mono text-[11px] rounded" x-text="y.course"></span></td>
+                                            <td class="px-4 py-3.5 font-semibold text-white" x-text="y.subject"></td>
+                                            <td class="px-4 py-3.5 font-mono text-emerald-400 font-black" x-text="y.year"></td>
+                                            <td class="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                                                <button @click="showEditYearModal(y, index)" class="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition-all"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                                                <button @click="deleteYear(index)" class="p-1 px-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded text-[11px] transition-all"><i class="fa-regular fa-trash-can"></i> Del</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="db.year_folders.length === 0">
+                                        <td colspan="4" class="px-4 py-8 text-center text-slate-500 font-mono text-xs">NO YEAR DIRECTORY FOLDERS REGISTERED</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 6: DISCONNECT / DISPATCH ANNOUNCEMENTS -->
+                <div x-show="activeTab === 'announcements'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Annals & Notification Announcements</h3>
+                            <p class="text-xs text-slate-400 font-mono uppercase tracking-widest text-[#10B981]">Central Config Broadcast</p>
+                        </div>
+                        <button @click="showAddAnnouncementModal()" class="px-3.5 py-2 bg-blue-600 hover:bg-blue-550 active:scale-[0.98] text-white text-xs font-bold rounded-lg shadow-lg shadow-blue-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-plus"></i> Dispatch Announcement
+                        </button>
+                    </div>
+
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-300">
+                                <thead class="bg-slate-950 text-slate-400 font-mono text-[10px] tracking-widest uppercase border-b border-slate-800">
+                                    <tr>
+                                        <th class="px-4 py-3">Dispatched Date</th>
+                                        <th class="px-4 py-3">Announcement Category</th>
+                                        <th class="px-4 py-3">Bulletin details</th>
+                                        <th class="px-4 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-800/60 font-mono">
+                                    <template x-for="(ann, index) in db.announcements" :key="index">
+                                        <tr class="hover:bg-slate-800/40 transition-colors">
+                                            <td class="px-4 py-3.5 text-blue-400 font-semibold" x-text="ann.date"></td>
+                                            <td class="px-4 py-3.5"><span class="px-2 py-0.5 bg-amber-500/15 text-amber-500 rounded font-bold border border-amber-500/25" x-text="ann.type"></span></td>
+                                            <td class="px-4 py-3.5 font-sans text-slate-100 font-semibold" x-text="ann.text text-sm"></td>
+                                            <td class="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                                                <button @click="showEditAnnouncementModal(ann, index)" class="p-1 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-[11px] transition-all"><i class="fa-solid fa-pen-to-square"></i> Edit</button>
+                                                <button @click="deleteAnnouncement(index)" class="p-1 px-2.5 bg-red-950/20 hover:bg-red-900/40 text-red-400 rounded text-[11px] transition-all"><i class="fa-regular fa-trash-can"></i> Del</button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <tr x-show="db.announcements.length === 0">
+                                        <td colspan="4" class="px-4 py-8 text-center text-slate-500 font-mono text-xs">NO BROADCASTED BULLETINS DETECTED</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 7: APPROVED PAYMENTS LEDGER -->
+                <div x-show="activeTab === 'payments'" class="space-y-6" x-transition>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-white">Payment Registry & Valid UTR Reference Ledger</h3>
+                            <p class="text-xs text-slate-400">Approved bank transfer transaction indicators which allow bypass checking.</p>
+                        </div>
+                        <button @click="addUtrReference()" class="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-550 hover:to-teal-555 text-white text-xs font-bold rounded-lg shadow-lg shadow-emerald-500/10 flex items-center gap-1.5 transition-all">
+                            <i class="fa-solid fa-plus"></i> Map New UTR ID
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="md:col-span-2 bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+                            <div class="p-4 bg-slate-950 font-mono text-[10px] tracking-widest text-slate-400 uppercase font-bold border-b border-slate-800">
+                                APPROVED UTR TRANSACTION IDs
+                            </div>
+                            <div class="divide-y divide-slate-800 max-h-[500px] overflow-y-auto font-mono">
+                                <template x-for="(utr, index) in db.utrList" :key="index">
+                                    <div class="p-3.5 px-4 flex items-center justify-between hover:bg-slate-800/20 transition-all">
+                                        <div class="flex items-center space-x-3">
+                                            <span class="w-2.5 h-2.5 bg-emerald-500 rounded-full"></span>
+                                            <span class="font-bold text-slate-100 tracking-wider text-sm" x-text="utr"></span>
+                                        </div>
+                                        <button @click="deleteUtr(index)" class="p-1 px-2.5 bg-red-950/25 hover:bg-red-900/45 text-red-400 rounded text-xs transition-colors"><i class="fa-solid fa-circle-minus"></i> Revoke</button>
+                                    </div>
+                                </template>
+                                <div x-show="db.utrList.length === 0" class="p-8 text-center text-slate-500 text-xs">
+                                    NO TRANSACTIONS CODED
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- UTR RULES BANNER -->
+                        <div class="p-5 bg-gradient-to-b from-[#1E293B] to-[#0F172A] border border-slate-800 rounded-xl flex flex-col justify-between space-y-4 shadow-md">
+                            <div class="space-y-3">
+                                <span class="text-[10px] font-bold tracking-widest uppercase text-amber-500 font-mono"><i class="fa-solid fa-shield-halved"></i> SECURE CHECKS</span>
+                                <h4 class="text-sm font-bold text-white">Fast-Track Approvals</h4>
+                                <p class="text-xs text-slate-400 leading-relaxed font-mono">
+                                    The app validates bank transaction reference codes (UTRs) matching this ledger array. Once matched, it auto-assigns active status profiles or enables courses instantly. Keep this record secure from modifications!
+                                </p>
+                            </div>
+                            <div class="text-[10px] text-slate-500 font-mono leading-tight">
+                                RECORD QUANTITY: <span class="font-bold text-white px-1" x-text="db.utrList.length"></span> KEYS ACTIVE
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 8: PROGRAMMABLE SERVER CONFIGS -->
+                <div x-show="activeTab === 'configs'" class="space-y-6" x-transition>
+                    <div>
+                        <h3 class="text-lg font-bold text-white">Global Remote App Settings</h3>
+                        <p class="text-xs text-slate-400">Manage app branding, help desks, UPI slots, dynamic paywalls, ads, and transition presets.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        
+                        <!-- COLUMN 1: GENERAL APP BRANDING -->
+                        <div class="p-6 bg-[#111827]/40 border border-slate-800 rounded-2xl space-y-4">
+                            <h4 class="text-xs font-mono font-bold tracking-widest text-blue-400 uppercase flex items-center gap-1.5"><i class="fa-solid fa-sliders"></i> Visual Core Config</h4>
+                            
+                            <div class="space-y-3 font-mono">
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Launcher App Name</label>
+                                    <input type="text" x-model="db.appConfig.appName" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Help Desk Link (Telegram/Channel)</label>
+                                    <input type="text" x-model="db.appConfig.helpLink" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Merchant UPI</label>
+                                        <input type="text" x-model="db.appConfig.merchantUpi" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Admin Password</label>
+                                        <input type="text" x-model="db.appConfig.adminPassword" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Recovery Email</label>
+                                        <input type="text" x-model="db.appConfig.recoveryEmail" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Recovery Mobile</label>
+                                        <input type="text" x-model="db.appConfig.recoveryMobile" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- COLUMN 2: PRICE TIERS & SLOT NAMINGS -->
+                        <div class="p-6 bg-[#111827]/40 border border-slate-800 rounded-2xl space-y-4">
+                            <h4 class="text-xs font-mono font-bold tracking-widest text-[#F59E0B] uppercase flex items-center gap-1.5"><i class="fa-solid fa-tags"></i> Pricing & Course slots</h4>
+                            
+                            <div class="space-y-3 font-mono">
+                                <div class="grid grid-cols-3 gap-1">
+                                    <div class="col-span-2">
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Course Slot 1</label>
+                                        <input type="text" x-model="db.appConfig.courseSlot1" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Price (₹)</label>
+                                        <input type="text" x-model="db.appConfig.bundlePriceBsc" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-1">
+                                    <div class="col-span-2">
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Course Slot 2</label>
+                                        <input type="text" x-model="db.appConfig.courseSlot2" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Price (₹)</label>
+                                        <input type="text" x-model="db.appConfig.bundlePricePbbsc" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-1">
+                                    <div class="col-span-2">
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Course Slot 3</label>
+                                        <input type="text" x-model="db.appConfig.courseSlot3" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Price (₹)</label>
+                                        <input type="text" x-model="db.appConfig.bundlePriceMsc" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-1">
+                                    <div class="col-span-2">
+                                        <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Fall-back Price</label>
+                                        <input type="text" x-model="db.appConfig.bundlePrice" class="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-[11px] text-white">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- COLUMN 3: SECURITY, ADS CONFIGS & DEEPER INTERNALS -->
+                        <div class="p-6 bg-[#111827]/40 border border-slate-800 rounded-2xl space-y-4">
+                            <h4 class="text-xs font-mono font-bold tracking-widest text-[#10B981] uppercase flex items-center gap-1.5"><i class="fa-solid fa-shield-halved"></i> Security, Ads & Analytics</h4>
+                            
+                            <div class="space-y-3 font-mono">
+                                <!-- Prominent Screenshot Toggle -->
+                                <div class="p-3 bg-gradient-to-r from-blue-950/30 to-slate-950 rounded-lg border border-blue-500/30 shadow-md">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <span class="text-blue-400 text-[10px] font-bold uppercase block tracking-wider"><i class="fa-solid fa-lock text-[9px] mr-1"></i> Screenshot Protection</span>
+                                            <span class="text-slate-500 text-[9px] block mt-0.5 font-sans leading-relaxed">Prevent students from screenshotting or screen-recording documents in the app.</span>
+                                        </div>
+                                        <input type="checkbox" x-model="db.appConfig.screenshotProtectionEnable" class="w-4 h-4 rounded text-blue-500 border-slate-800 focus:ring-0 bg-slate-950 transition-colors">
+                                    </div>
+                                </div>
+                                <div class="flex items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                                    <span class="text-slate-400 text-[10px] font-bold uppercase">Enable AdMob Ads</span>
+                                    <input type="checkbox" x-model="db.appConfig.adEnable" class="w-4 h-4 rounded text-blue-500 focus:ring-0">
+                                </div>
+                                <div class="flex items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                                    <span class="text-slate-400 text-[10px] font-bold uppercase">Enable Custom Script Ads</span>
+                                    <input type="checkbox" x-model="db.appConfig.scriptAdEnable" class="w-4 h-4 rounded text-blue-500 focus:ring-0">
+                                </div>
+                                <div class="flex items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800/80">
+                                    <span class="text-slate-400 text-[10px] font-bold uppercase">Detect Private DNS & AdGuard</span>
+                                    <input type="checkbox" x-model="db.appConfig.adBlockDetectionEnable" class="w-4 h-4 rounded text-blue-500 focus:ring-0">
+                                </div>
+                                <div class="flex items-center justify-between p-2 bg-slate-950 rounded-lg border border-slate-800/80" x-show="db.appConfig.adBlockDetectionEnable">
+                                    <span class="text-slate-400 text-[10px] font-bold uppercase">Show 'Close' Bypass Button</span>
+                                    <input type="checkbox" x-model="db.appConfig.adBlockShowCloseButton" class="w-4 h-4 rounded text-blue-500 focus:ring-0">
+                                </div>
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Banner Unit ID</label>
+                                    <input type="text" x-model="db.appConfig.bannerAdUnitId" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                </div>
+                                <div>
+                                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Interstitial Unit ID</label>
+                                    <input type="text" x-model="db.appConfig.interstitialAdUnitId" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                                </div>
+                                <div class="sm:col-span-2">
+                                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Custom Ad Code Paste Box (HTML / JS)</label>
+                                    <textarea x-model="db.appConfig.scriptAdCode" rows="4" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-white" placeholder="Paste your Adsterra, Google AdSense, or other custom script/html ad code here..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+
+    <!-- ==============================================
+         CRITICAL POP-UP DIALOG MODALS LISTS
+    =============================================== -->
+
+    <!-- STUDENT EDIT/ADD DIALOG MODAL -->
+    <div x-show="isEditingStudent" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" x-cloak>
+        <div class="w-full max-w-lg bg-[#1E293B] border border-slate-750 border-slate-705 p-6 rounded-2xl shadow-xl space-y-5" @click.away="isEditingStudent = false">
+            <h4 class="text-base font-bold text-white flex items-center gap-1.5">
+                <i class="fa-solid fa-user-graduate text-blue-400"></i>
+                <span x-text="studentForm.index === -1 ? 'Configure New Student Account' : 'Edit Registered Student Record'"></span>
+            </h4>
+            
+            <div class="grid grid-cols-2 gap-4 font-mono">
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Full Name</label>
+                    <input type="text" x-model="studentForm.name" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="Siddharth Gowda">
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Contact Phone ID / Email</label>
+                    <input type="text" x-model="studentForm.contactId" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="9876543210">
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Account Password</label>
+                    <input type="text" x-model="studentForm.password" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="1234">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Associated Active Token / ID</label>
+                    <input type="text" x-model="studentForm.studentId" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-emerald-400 tracking-wider uppercase font-bold" placeholder="BSC-NURSING-ACCESS">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="isEditingStudent = false" class="px-4 py-2 border border-slate-700 hover:bg-slate-850 text-slate-300 text-xs rounded-lg font-semibold">Cancel</button>
+                <button @click="commitStudentForm()" class="px-4 py-2 bg-blue-600 hover:bg-blue-550 text-white font-bold text-xs rounded-lg">Apply Record</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF RESOURCE EDIT/ADD DIALOG MODAL -->
+    <div x-show="isEditingResource" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" x-cloak>
+        <div class="w-full max-w-xl bg-[#1E293B] border border-slate-750 border-slate-705 p-6 rounded-2xl shadow-xl space-y-5" @click.away="isEditingResource = false">
+            <h4 class="text-base font-bold text-white flex items-center gap-1.5">
+                <i class="fa-regular fa-file-pdf text-amber-500"></i>
+                <span x-text="resourceForm.index === -1 ? 'Index New PDF Exam Resource' : 'Edit Mapped PDF Config'"></span>
+            </h4>
+            
+            <div class="grid grid-cols-2 gap-4 font-mono">
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Course Allocation</label>
+                    <select x-model="resourceForm.course" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="">Select Category</option>
+                        <option x-text="db.appConfig.courseSlot1 || 'B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot2 || 'P.B.B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot3 || 'M.Sc'"></option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Exam Folder Year</label>
+                    <input type="number" x-model.number="resourceForm.year" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="2024">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Allocated Syllabus Subject</label>
+                    <select x-model="resourceForm.subject" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="">Select Subject Folder</option>
+                        <template x-for="s in db.subjects">
+                            <option :value="s.subject" x-text="s.subject + ' (' + s.course + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Active Ledger Document Title</label>
+                    <input type="text" x-model="resourceForm.title" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="Microbiology Past Exam Paper II">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Direct PDF Url</label>
+                    <div class="relative">
+                        <input type="text" x-model="resourceForm.url" class="w-full px-3 pr-24 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-blue-400 font-mono" placeholder="https://files.catbox.moe/example.pdf">
+                        <div class="absolute inset-y-1.5 right-1.5">
+                            <label class="cursor-pointer bg-blue-600/20 text-blue-400 border border-blue-550/20 font-bold px-3 py-1 text-[10px] hover:bg-blue-600 hover:text-white rounded transition-colors flex items-center justify-center">
+                                <span x-show="!isUploading"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> Upload File</span>
+                                <span x-show="isUploading"><i class="fa-solid fa-spinner animate-spin mr-1"></i> Syncing...</span>
+                                <input type="file" @change="uploadResourceFile($event)" accept=".pdf,.docx" class="hidden">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DRAG AND DROP ZONE -->
+                <div class="col-span-2">
+                    <div 
+                        @dragover.prevent="dragOver = true" 
+                        @dragleave.prevent="dragOver = false" 
+                        @drop.prevent="dropResourceFile($event); dragOver = false"
+                        :class="dragOver ? 'border-blue-500 bg-blue-600/10' : 'border-slate-800 bg-slate-950/40'"
+                        class="border-2 border-dashed p-4 rounded-xl flex flex-col items-center justify-center text-center space-y-1 transition-all"
+                    >
+                        <i class="fa-regular fa-file-pdf text-xl" :class="dragOver ? 'text-blue-400 animate-bounce' : 'text-slate-500'"></i>
+                        <p class="text-[11px] text-slate-400">Drag & Drop PDF or DOCX file to upload instantly to Cloud storage and auto-fill URL</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Alert Indicator -->
+            <div x-show="uploadSuccessUrl" class="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 text-[10px] font-mono flex items-center gap-2">
+                <i class="fa-solid fa-circle-check"></i>
+                Uploaded successfully: <a :href="uploadSuccessUrl" target="_blank" class="underline block truncate max-w-[400px]" x-text="uploadSuccessUrl"></a>
+            </div>
+            <div x-show="uploadError" class="p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-[10px] font-sans flex items-center gap-2">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span class="leading-relaxed" x-text="uploadError"></span>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="isEditingResource = false; clearUploadIndicators()" class="px-4 py-2 border border-slate-700 hover:bg-slate-850 text-slate-300 text-xs rounded-lg font-semibold">Cancel</button>
+                <button @click="commitResourceForm()" class="px-4 py-2 bg-blue-600 hover:bg-blue-550 text-white font-bold text-xs rounded-lg">Confirm Resource</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUBJECT EDIT/ADD DIALOG MODAL -->
+    <div x-show="isEditingSubject" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" x-cloak>
+        <div class="w-full max-w-lg bg-[#1E293B] border border-slate-750 border-slate-705 p-6 rounded-2xl shadow-xl space-y-5" @click.away="isEditingSubject = false">
+            <h4 class="text-base font-bold text-white flex items-center gap-1.5">
+                <i class="fa-solid fa-book-medical text-indigo-400"></i>
+                <span x-text="subjectForm.index === -1 ? 'Create New Course Subject' : 'Edit Catalog Subject'"></span>
+            </h4>
+            
+            <div class="grid grid-cols-2 gap-4 font-mono">
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Course Target</label>
+                    <select x-model="subjectForm.course" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="">Select Degree</option>
+                        <option x-text="db.appConfig.courseSlot1 || 'B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot2 || 'P.B.B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot3 || 'M.Sc'"></option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Assigned Semester</label>
+                    <input type="number" x-model.number="subjectForm.semester" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="1">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Subject Name</label>
+                    <input type="text" x-model="subjectForm.subject" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="Biochemistry & Nutrition">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Syllabus PDF URL Link</label>
+                    <input type="text" x-model="subjectForm.syllabusUrl" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-blue-400" placeholder="https://files.catbox.moe/syll.pdf">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="isEditingSubject = false" class="px-4 py-2 border border-slate-700 hover:bg-slate-850 text-slate-300 text-xs rounded-lg font-semibold">Cancel</button>
+                <button @click="commitSubjectForm()" class="px-4 py-2 bg-blue-600 hover:bg-blue-550 text-white font-bold text-xs rounded-lg">Confirm Subject</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- YEAR FOLDER EDIT/ADD DIALOG MODAL -->
+    <div x-show="isEditingYear" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" x-cloak>
+        <div class="w-full max-w-lg bg-[#1E293B] border border-slate-750 border-slate-755 p-6 rounded-2xl shadow-xl space-y-5" @click.away="isEditingYear = false">
+            <h4 class="text-base font-bold text-white flex items-center gap-1.5">
+                <i class="fa-solid fa-folder-open text-pink-400"></i>
+                <span x-text="yearForm.index === -1 ? 'Configure Exam Folders map' : 'Update mapped Year directory'"></span>
+            </h4>
+            
+            <div class="grid grid-cols-2 gap-4 font-mono">
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Degree Allocation</label>
+                    <select x-model="yearForm.course" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="">Select Course</option>
+                        <option x-text="db.appConfig.courseSlot1 || 'B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot2 || 'P.B.B.Sc'"></option>
+                        <option x-text="db.appConfig.courseSlot3 || 'M.Sc'"></option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Associated Exam Year</label>
+                    <input type="number" x-model.number="yearForm.year" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="2024">
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Syllabus Subject Tag</label>
+                    <select x-model="yearForm.subject" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="">Select Tag</option>
+                        <template x-for="s in db.subjects">
+                            <option :value="s.subject" x-text="s.subject + ' (' + s.course + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="isEditingYear = false" class="px-4 py-2 border border-slate-700 hover:bg-slate-850 text-slate-300 text-xs rounded-lg font-semibold">Cancel</button>
+                <button @click="commitYearForm()" class="px-4 py-2 bg-blue-600 hover:bg-blue-550 text-white font-bold text-xs rounded-lg">Apply Directory</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ANNOUNCEMENT EDIT/ADD DIALOG MODAL -->
+    <div x-show="isEditingAnnouncement" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-center justify-center p-4" x-cloak>
+        <div class="w-full max-w-lg bg-[#1E293B] border border-slate-750 border-slate-705 p-6 rounded-2xl shadow-xl space-y-5" @click.away="isEditingAnnouncement = false">
+            <h4 class="text-base font-bold text-white flex items-center gap-1.5">
+                <i class="fa-solid fa-bullhorn text-[#10B981]"></i>
+                <span x-text="announcementForm.index === -1 ? 'Dispatch Global announcement link' : 'Update Announcement bulletin'"></span>
+            </h4>
+            
+            <div class="grid grid-cols-2 gap-4 font-mono">
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Bulletin dispatch Date</label>
+                    <input type="text" x-model="announcementForm.date" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white" placeholder="12 JUN, 2026">
+                </div>
+                <div>
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Importance Level</label>
+                    <select x-model="announcementForm.type" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white">
+                        <option value="GENERAL">GENERAL UPDATES</option>
+                        <option value="CRITICAL">ALERT/EXAMS</option>
+                        <option value="SYLLABUS">SYLLABUS NOTIFY</option>
+                        <option value="BULLETIN">BROADCAST BULLETINS</option>
+                    </select>
+                </div>
+                <div class="col-span-2">
+                    <label class="block text-slate-400 text-[10px] font-bold uppercase mb-1">Announcement Bulletin Text</label>
+                    <textarea x-model="announcementForm.text" rows="4" class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-105 file:text-white" placeholder="RGUHS B.Sc Nursing Exams will commence on August 3rd, 2026. Make sure to download past papers compiled on slot 1 folder indexes!..."></textarea>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="isEditingAnnouncement = false" class="px-4 py-2 border border-slate-700 hover:bg-slate-850 text-slate-300 text-xs rounded-lg font-semibold">Cancel</button>
+                <button @click="commitAnnouncementForm()" class="px-4 py-2 bg-blue-600 hover:bg-blue-550 text-white font-bold text-xs rounded-lg">Broadcast Bulletin</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==============================================
+         CORE ADMINISTRATIVE SCRIPT MOTOR
+    =============================================== -->
+    <script>
+        const CURRENT_APP_VERSION = 70; // Current system constant
+        function formatAppVersion(version) {
+            const major = 1;
+            const minor = 0;
+            const patch = version >= 60 ? version - 60 : version;
+            return `${major}.${minor}.${patch}`;
+        }
+        const STABLE_API_BASE = 'https://api.npoint.io/';
+
+        function adminDashboard() {
+            return {
+                CURRENT_APP_VERSION: CURRENT_APP_VERSION,
+                formatAppVersion(v) {
+                    return formatAppVersion(v);
+                },
+                binId: localStorage.getItem('rguhs_bin_id') || 'a20ffed648ea679c5ce2',
+                adminPassword: '',
+                isLoggedIn: false,
+                loading: false,
+                saving: false,
+                loadingText: 'Re-indexing Central Database...',
+                activeTab: 'telemetry',
+                hasUnsavedChanges: false,
+                
+                // Real local mock-replica state model
+                db: {
+                    subjects: [],
+                    year_folders: [],
+                    resource_files: [],
+                    announcements: [],
+                    registered_students: [],
+                    appConfig: {
+                        appName: 'RGUHS Nursing Hub',
+                        latestApkVersion: 55,
+                        apkDownloadUrl: '',
+                        dbVersion: 0,
+                        screenshotProtectionEnable: true
+                    },
+                    utrList: []
+                },
+                
+                // Form triggers & Modals states
+                searchStudent: '',
+                searchResource: '',
+                filterCourse: '',
+                filterSubject: '',
+                
+                isEditingStudent: false,
+                studentForm: { index: -1, name: '', contactId: '', password: '', studentId: '', registeredAt: '' },
+
+                isEditingResource: false,
+                resourceForm: { index: -1, course: '', subject: '', year: 2024, title: '', url: '' },
+                dragOver: false,
+                isUploading: false,
+                uploadSuccessUrl: null,
+                uploadError: null,
+
+                isEditingSubject: false,
+                subjectForm: { index: -1, course: '', subject: '', semester: null, syllabusUrl: '' },
+
+                isEditingYear: false,
+                yearForm: { index: -1, course: '', subject: '', year: 2024 },
+
+                isEditingAnnouncement: false,
+                announcementForm: { index: -1, date: '', type: 'GENERAL', text: '' },
+                
+                loginError: null,
+
+                initDashboard() {
+                    // Check auto session
+                    const savedPass = sessionStorage.getItem('rguhs_admin_pass');
+                    if (savedPass) {
+                        this.adminPassword = savedPass;
+                        this.authenticateAdmin();
+                    }
+                    this.$watch('db', value => {
+                        if (this.isLoggedIn) {
+                            this.hasUnsavedChanges = true;
+                        }
+                    });
+                },
+
+                async authenticateAdmin() {
+                    this.loading = true;
+                    this.loadingText = 'Validating central cloud credentials...';
+                    this.loginError = null;
+
+                    try {
+                        const targetUrl = `${STABLE_API_BASE}${this.binId.trim()}`;
+                        const response = await fetch(targetUrl);
+                        if (!response.ok) {
+                            throw new Error(`Central ledger responded with code ${response.status}. Key might be invalid.`);
+                        }
+                        const remoteDb = await response.json();
+                        
+                        // Check password matching
+                        const targetPassword = (remoteDb.appConfig && remoteDb.appConfig.adminPassword) || '1234';
+                        if (this.adminPassword.trim() !== targetPassword.trim()) {
+                            throw new Error('Access Refused: Correct authorization key credentials required.');
+                        }
+
+                        // Set structures
+                        this.db = {
+                            subjects: remoteDb.subjects || [],
+                            year_folders: remoteDb.year_folders || [],
+                            resource_files: remoteDb.resource_files || [],
+                            announcements: remoteDb.announcements || [],
+                            registered_students: remoteDb.registered_students || [],
+                            appConfig: Object.assign({
+                                appName: 'RGUHS Nursing Hub',
+                                latestApkVersion: 55,
+                                apkDownloadUrl: '',
+                                dbVersion: 0,
+                                screenshotProtectionEnable: true
+                            }, remoteDb.appConfig),
+                            utrList: remoteDb.utrList || []
+                        };
+
+                        // Store sessions safely
+                        localStorage.setItem('rguhs_bin_id', this.binId.trim());
+                        sessionStorage.setItem('rguhs_admin_pass', this.adminPassword.trim());
+                        this.isLoggedIn = true;
+                    } catch (err) {
+                        console.error('Lock error:', err);
+                        this.loginError = err.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                forceReSync() {
+                    this.authenticateAdmin();
+                },
+
+                async saveDatabaseToServer() {
+                    this.saving = true;
+                    this.loading = true;
+                    this.loadingText = 'Deploying database revisions to primary node array...';
+
+                    try {
+                        const targetUrl = `${STABLE_API_BASE}${this.binId.trim()}`;
+                        
+                        // Sync auto-properties
+                        this.db.appConfig.dbVersion = (this.db.appConfig.dbVersion || 0) + 1;
+
+                        const response = await fetch(targetUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(this.db)
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`Database error. Node refused state upload: [${response.status}]`);
+                        }
+                        
+                        this.hasUnsavedChanges = false;
+                        alert(`SUCCESS: Deployed config to primary web indices! Server Version: v${this.db.appConfig.dbVersion}`);
+                    } catch (e) {
+                        console.error('Deploy fail:', e);
+                        alert(`DEPLOY FAULT: ${e.message}`);
+                    } finally {
+                        this.saving = false;
+                        this.loading = false;
+                    }
+                },
+
+                incrementTargetVersion() {
+                    const target = Math.max((this.db.appConfig.latestApkVersion || CURRENT_APP_VERSION) + 1, CURRENT_APP_VERSION + 1);
+                    this.db.appConfig.latestApkVersion = target;
+                    alert(`Version configured to lock standard builds on students' dashboards as v${formatAppVersion(target)}. Click "Save DB to Cloud" to begin broad notification immediately.`);
+                },
+
+                alignToCurrentBuild() {
+                    this.db.appConfig.latestApkVersion = CURRENT_APP_VERSION;
+                    if (this.db.appConfig.forceShowUpdateBanner) {
+                        this.db.appConfig.forceShowUpdateBanner = false;
+                    }
+                    alert(`Version aligned back to current live build (v${formatAppVersion(CURRENT_APP_VERSION)}). Click "Save DB to Cloud" to apply.`);
+                },
+
+                logout() {
+                    sessionStorage.removeItem('rguhs_admin_pass');
+                    this.isLoggedIn = false;
+                    this.adminPassword = '';
+                },
+
+                // --- STUDENT CRUD ENGINE
+                filteredStudents() {
+                    if (!this.searchStudent.trim()) return this.db.registered_students;
+                    const q = this.searchStudent.toLowerCase();
+                    return this.db.registered_students.filter(s => 
+                        (s.name && s.name.toLowerCase().includes(q)) ||
+                        (s.contactId && s.contactId.toLowerCase().includes(q)) ||
+                        (s.studentId && s.studentId.toLowerCase().includes(q))
+                    );
+                },
+
+                showAddStudentModal() {
+                    this.studentForm = { index: -1, name: '', contactId: '', password: '1234', studentId: 'BSC-NURSING-ACCESS', registeredAt: new Date().toLocaleDateString('en-IN', {day: 'numeric', month: 'short', year: 'numeric'}) };
+                    this.isEditingStudent = true;
+                },
+
+                showEditStudentModal(item, idx) {
+                    this.studentForm = { index: idx, name: item.name, contactId: item.contactId, password: item.password, studentId: item.studentId, registeredAt: item.registeredAt };
+                    this.isEditingStudent = true;
+                },
+
+                commitStudentForm() {
+                    if (!this.studentForm.name.trim() || !this.studentForm.contactId.trim() || !this.studentForm.studentId.trim()) {
+                        alert('All fields are requested for safe database mappings.');
+                        return;
+                    }
+                    const compiled = {
+                        name: this.studentForm.name.trim(),
+                        contactId: this.studentForm.contactId.trim(),
+                        studentId: this.studentForm.studentId.trim(),
+                        password: this.studentForm.password.trim(),
+                        registeredAt: this.studentForm.registeredAt
+                    };
+                    if (this.studentForm.index === -1) {
+                        this.db.registered_students.push(compiled);
+                    } else {
+                        this.db.registered_students[this.studentForm.index] = compiled;
+                    }
+                    this.isEditingStudent = false;
+                },
+
+                deleteStudent(idx) {
+                    if (confirm('Permanently delete this verification credential record?')) {
+                        this.db.registered_students.splice(idx, 1);
+                    }
+                },
+
+                // --- PDF RESOURCES CRUD ENGINE
+                getSemesterText(file) {
+                    if (!this.db || !this.db.subjects) return '';
+                    const normalizeCourse = (course) => {
+                        if (!course) return '';
+                        const c = course.trim().toLowerCase();
+                        if (c === 'bsc' || c.includes('b.sc') || c.includes('bsc')) return 'bsc';
+                        if (c === 'post_basic' || c.includes('post_basic') || c.includes('post-basic') || c.includes('p.b.b.sc') || c.includes('pbbsc') || c.includes('post basic')) return 'post_basic';
+                        if (c === 'msc' || c.includes('m.sc') || c.includes('msc')) return 'msc';
+                        return c;
+                    };
+                    const sub = this.db.subjects.find(s => 
+                        normalizeCourse(s.course) === normalizeCourse(file.course) &&
+                        s.subject.trim().toLowerCase() === file.subject.trim().toLowerCase()
+                    ) || this.db.subjects.find(s => 
+                        s.subject.trim().toLowerCase() === file.subject.trim().toLowerCase()
+                    );
+                    if (sub && sub.semester) {
+                        return 'Sem ' + sub.semester;
+                    }
+                    return '';
+                },
+
+                filteredResources() {
+                    let files = this.db.resource_files;
+                    if (this.filterCourse) {
+                        files = files.filter(f => f.course === this.filterCourse);
+                    }
+                    if (this.searchResource.trim()) {
+                        const q = this.searchResource.toLowerCase();
+                        files = files.filter(f => 
+                            (f.title && f.title.toLowerCase().includes(q)) ||
+                            (f.subject && f.subject.toLowerCase().includes(q))
+                        );
+                    }
+                    return files;
+                },
+
+                showAddResourceModal() {
+                    this.clearUploadIndicators();
+                    this.resourceForm = { index: -1, course: this.db.appConfig.courseSlot1 || 'B.Sc Nursing', subject: '', year: 2024, title: '', url: '' };
+                    this.isEditingResource = true;
+                },
+
+                showEditResourceModal(item, idx) {
+                    this.clearUploadIndicators();
+                    this.resourceForm = { index: idx, course: item.course, subject: item.subject, year: item.year, title: item.title, url: item.url };
+                    this.isEditingResource = true;
+                },
+
+                commitResourceForm() {
+                    if (!this.resourceForm.course || !this.resourceForm.subject || !this.resourceForm.title.trim() || !this.resourceForm.url.trim()) {
+                        alert('Select course structure, assign subject name, map headers, and confirm active PDF url.');
+                        return;
+                    }
+                    const compiled = {
+                        course: this.resourceForm.course,
+                        subject: this.resourceForm.subject,
+                        year: parseInt(this.resourceForm.year) || 2024,
+                        title: this.resourceForm.title.trim(),
+                        url: this.resourceForm.url.trim()
+                    };
+                    if (this.resourceForm.index === -1) {
+                        this.db.resource_files.push(compiled);
+                    } else {
+                        this.db.resource_files[this.resourceForm.index] = compiled;
+                    }
+                    this.isEditingResource = false;
+                },
+
+                deleteResource(idx) {
+                    if (confirm('Permanently erase this past exam PDF URL configuration link?')) {
+                        this.db.resource_files.splice(idx, 1);
+                    }
+                },
+
+                // --- DYNAMIC CATBOX UPLOADER DISPATCHER
+                clearUploadIndicators() {
+                    this.isUploading = false;
+                    this.uploadSuccessUrl = null;
+                    this.uploadError = null;
+                },
+
+                async uploadResourceFile(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    await this.executeCloudUpload(file);
+                },
+
+                async dropResourceFile(event) {
+                    const file = event.dataTransfer.files[0];
+                    if (!file) return;
+                    await this.executeCloudUpload(file);
+                },
+
+                async executeCloudUpload(file) {
+                    const lowerName = file.name.toLowerCase();
+                    if (file.type !== 'application/pdf' && !lowerName.endsWith('.pdf') && !lowerName.endsWith('.docx')) {
+                        this.uploadError = 'Format Refused: Active administrative standards only allow PDF and DOCX file types.';
+                        return;
+                    }
+                    this.isUploading = true;
+                    this.uploadError = null;
+                    this.uploadSuccessUrl = null;
+
+                    try {
+                        const payload = new FormData();
+                        payload.append('reqtype', 'fileupload');
+                        payload.append('fileToUpload', file);
+
+                        // Direct upload via Catbox.moe API
+                        const result = await fetch('https://catbox.moe/user/api.php', {
+                            method: 'POST',
+                            body: payload,
+                            mode: 'cors'
+                        });
+
+                        if (!result.ok) {
+                            throw new Error(`Upload fault. Server returned ${result.status} error states.`);
+                        }
+
+                        const text = await result.text();
+                        const cleaned = text.trim();
+
+                        if (cleaned.startsWith('http')) {
+                            this.uploadSuccessUrl = cleaned;
+                            this.resourceForm.url = cleaned;
+                            // Set dynamic title if empty
+                            if (!this.resourceForm.title) {
+                                this.resourceForm.title = file.name.replace('.pdf', '').replace(/_/g, ' ');
+                            }
+                        } else {
+                            throw new Error(`Payload parsing exception: ${cleaned}`);
+                        }
+                    } catch (e) {
+                        console.error('Direct upload failed, launching temporary Litterbox fallback...', e);
+                        try {
+                            // Temporary 72H Litterbox API uploader
+                            const payload = new FormData();
+                            payload.append('reqtype', 'fileupload');
+                            payload.append('time', '72h'); // 3 days
+                            payload.append('fileToUpload', file);
+
+                            const result = await fetch('https://litterbox.catbox.moe/resources/upload.php', {
+                                method: 'POST',
+                                body: payload,
+                                mode: 'cors'
+                            });
+
+                            const text = await result.text();
+                            const cleaned = text.trim();
+
+                            if (cleaned.startsWith('http')) {
+                                this.uploadSuccessUrl = cleaned;
+                                this.resourceForm.url = cleaned;
+                                if (!this.resourceForm.title) {
+                                    this.resourceForm.title = file.name.replace('.pdf', '').replace(/_/g, ' ');
+                                }
+                            } else {
+                                throw new Error(cleaned);
+                            }
+                        } catch (fail2) {
+                            console.error('All APIs blocked by CORS', fail2);
+                            this.uploadError = "Direct cloud uploading was rejected by the browser's CORS Network Policy. Solution: Go to 'https://catbox.moe' or 'https://postimages.org' or 'Google Drive' on the browser, select and upload your PDF, then copy-paste the web link inside the 'Direct PDF Url' input directly!";
+                        }
+                    } finally {
+                        this.isUploading = false;
+                    }
+                },
+
+                // --- SUBJECTS CRUD ENGINE
+                showAddSubjectModal() {
+                    this.subjectForm = { index: -1, course: this.db.appConfig.courseSlot1 || 'B.Sc Nursing', subject: '', semester: null, syllabusUrl: '' };
+                    this.isEditingSubject = true;
+                },
+
+                showEditSubjectModal(item, idx) {
+                    this.subjectForm = { index: idx, course: item.course, subject: item.subject, semester: item.semester, syllabusUrl: item.syllabusUrl };
+                    this.isEditingSubject = true;
+                },
+
+                commitSubjectForm() {
+                    if (!this.subjectForm.course || !this.subjectForm.subject.trim()) {
+                        alert('Subject name and target degree course slots are essential fields.');
+                        return;
+                    }
+                    const compiled = {
+                        course: this.subjectForm.course,
+                        subject: this.subjectForm.subject.trim(),
+                        semester: this.subjectForm.semester !== null && this.subjectForm.semester !== '' ? parseInt(this.subjectForm.semester) : null,
+                        syllabusUrl: this.subjectForm.syllabusUrl.trim()
+                    };
+                    if (this.subjectForm.index === -1) {
+                        this.db.subjects.push(compiled);
+                    } else {
+                        const oldSub = this.db.subjects[this.subjectForm.index];
+                        const oldName = oldSub.subject;
+                        const newName = compiled.subject;
+                        if (oldName.trim().toLowerCase() !== newName.trim().toLowerCase()) {
+                            // Rename year folders matching oldName and correct course
+                            this.db.year_folders.forEach(y => {
+                                if (y.course.toLowerCase() === oldSub.course.toLowerCase() && y.subject.toLowerCase() === oldName.toLowerCase()) {
+                                    y.subject = newName;
+                                }
+                            });
+                            // Rename resource files matching oldName and correct course
+                            this.db.resource_files.forEach(r => {
+                                if (r.course.toLowerCase() === oldSub.course.toLowerCase() && r.subject.toLowerCase() === oldName.toLowerCase()) {
+                                    r.subject = newName;
+                                }
+                            });
+                        }
+                        this.db.subjects[this.subjectForm.index] = compiled;
+                    }
+                    this.isEditingSubject = false;
+                },
+
+                deleteSubject(idx) {
+                    if (confirm('Permanently erase this curriculum subject catalog entry? Unlocks corresponding year folders.')) {
+                        this.db.subjects.splice(idx, 1);
+                    }
+                },
+
+                // --- YEAR DIRECTORY CRUD ENGINE
+                showAddYearModal() {
+                    this.yearForm = { index: -1, course: this.db.appConfig.courseSlot1 || 'B.Sc Nursing', subject: '', year: 2024 };
+                    this.isEditingYear = true;
+                },
+
+                showEditYearModal(item, idx) {
+                    this.yearForm = { index: idx, course: item.course, subject: item.subject, year: item.year };
+                    this.isEditingYear = true;
+                },
+
+                commitYearForm() {
+                    if (!this.yearForm.course || !this.yearForm.subject || !this.yearForm.year) {
+                        alert('Select relevant course, subject node maps, and record valid exam compilation year.');
+                        return;
+                    }
+                    const compiled = {
+                        course: this.yearForm.course,
+                        subject: this.yearForm.subject,
+                        year: parseInt(this.yearForm.year) || 2024
+                    };
+                    if (this.yearForm.index === -1) {
+                        this.db.year_folders.push(compiled);
+                    } else {
+                        this.db.year_folders[this.yearForm.index] = compiled;
+                    }
+                    this.isEditingYear = false;
+                },
+
+                deleteYear(idx) {
+                    if (confirm('Revoke this Year directory map index? Resource links within this folder will remain unindexed.')) {
+                        this.db.year_folders.splice(idx, 1);
+                    }
+                },
+
+                // --- ANNOUNCEMENT BULLETINS CRUD ENGINE
+                showAddAnnouncementModal() {
+                    this.announcementForm = { index: -1, date: new Date().toLocaleDateString('en-IN', {day: 'numeric', month: 'short', year: 'numeric'}), type: 'GENERAL', text: '' };
+                    this.isEditingAnnouncement = true;
+                },
+
+                showEditAnnouncementModal(item, idx) {
+                    this.announcementForm = { index: idx, date: item.date, type: item.type, text: item.text };
+                    this.isEditingAnnouncement = true;
+                },
+
+                commitAnnouncementForm() {
+                    if (!this.announcementForm.date.trim() || !this.announcementForm.text.trim()) {
+                        alert('Specify announcement date and fill the detailed bulletin field.');
+                        return;
+                    }
+                    const compiled = {
+                        date: this.announcementForm.date.trim(),
+                        type: this.announcementForm.type,
+                        text: this.announcementForm.text.trim()
+                    };
+                    if (this.announcementForm.index === -1) {
+                        this.db.announcements.push(compiled);
+                    } else {
+                        this.db.announcements[this.announcementForm.index] = compiled;
+                    }
+                    this.isEditingAnnouncement = false;
+                },
+
+                deleteAnnouncement(idx) {
+                    if (confirm('Permanently cancel and take down this bulletin notification announcement?')) {
+                        this.db.announcements.splice(idx, 1);
+                    }
+                },
+
+                // --- UTR DIRECT OPERATIONS
+                addUtrReference() {
+                    const utr = prompt('Write or paste new valid bank transaction UTR reference code to approve access bypass:');
+                    if (utr && utr.trim()) {
+                        const cleaned = utr.trim().toUpperCase();
+                        if (this.db.utrList.indexOf(cleaned) > -1) {
+                            alert('Duplicate item. This UTR reference code is already validated.');
+                            return;
+                        }
+                        this.db.utrList.push(cleaned);
+                    }
+                },
+
+                deleteUtr(idx) {
+                    if (confirm('Revoke valid verification status from this transaction reference code?')) {
+                        this.db.utrList.splice(idx, 1);
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

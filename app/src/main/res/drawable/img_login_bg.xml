@@ -1,0 +1,36 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="360dp"
+    android:height="640dp"
+    android:viewportWidth="360"
+    android:viewportHeight="640">
+    <!-- Sophisticated Professional Classic Deep Blue Theme Gradient Backdrop -->
+    <path
+        android:pathData="M0,0 h360 v640 h-360 z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="180"
+                android:startY="0"
+                android:endX="180"
+                android:endY="640"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#001F54" />
+                <item android:offset="0.5" android:color="#003566" />
+                <item android:offset="1.0" android:color="#0A1128" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Premium vector accent wave lines tracking medical/nursing flow -->
+    <path
+        android:pathData="M-50,150 C100,100 200,300 410,250"
+        android:strokeColor="#1FFFFFFF"
+        android:strokeWidth="1.5"/>
+    <path
+        android:pathData="M-50,180 C100,130 180,350 410,290"
+        android:strokeColor="#0AFFFFFF"
+        android:strokeWidth="3.0"/>
+    <path
+        android:pathData="M-50,450 C80,500 220,380 410,480"
+        android:strokeColor="#10FFFFFF"
+        android:strokeWidth="2.0"/>
+</vector>
